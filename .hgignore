@@ -1,0 +1,12 @@
+syntax: glob
+.cache
+*.orig
+*.swp
+*.pyc
+*egg-info
+docs/_build/
+pupynere.org/
+build/
+dist/
+setup.py
+paver-minilib.zip
