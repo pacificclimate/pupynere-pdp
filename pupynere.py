@@ -191,7 +191,7 @@ class netcdf_file(object):
         self.mode = mode
 
         self.dimensions = {}
-        self.variables = {}
+        self.variables = NcOrderedDict()
 
         self._dims = []
         self._recs = 0
@@ -243,7 +243,7 @@ class netcdf_file(object):
         self.dimensions[name] = length
         self._dims.append(name)
 
-    def createVariable(self, name, type, dimensions):
+    def createVariable(self, name, type, dimensions, attributes=None):
         """
         Create an empty variable for the `netcdf_file` object, specifying its data
         type and the dimensions it uses.
@@ -256,6 +256,9 @@ class netcdf_file(object):
             Data type of the variable.
         dimensions : sequence of str
             List of the dimension names used by the variable, in the desired order.
+        attributes : dict, optional
+            Attribute values (any type) keyed by string names.  These attributes
+            become attributes for the netcdf_variable object.
 
         Returns
         -------
@@ -284,9 +287,11 @@ class netcdf_file(object):
             raise ValueError("NetCDF 3 does not support type %s" % type)
 
         data = empty(shape_, type)
+
         self.variables[name] = netcdf_variable(
                 data, type, shape, dimensions,
-                maskandscale=self.maskandscale)
+                maskandscale=self.maskandscale,
+                attributes=attributes)
         return self.variables[name]
 
     def flush(self):
@@ -302,86 +307,136 @@ class netcdf_file(object):
             self._write()
     sync = flush
 
+    def recvars(self):
+        return OrderedDict( filter(lambda (k, v): v.isrec, self.variables.items()) )
+    recvars = property(recvars)
+
+    def non_recvars(self):
+        return OrderedDict( filter(lambda (k, v): not v.isrec, self.variables.items()) )
+    non_recvars = property(non_recvars)
+
+    def __generate__(self):
+        self._calc_begins()
+        yield self._header()
+        for chunk in self._data():
+            yield chunk
+
+    def _header(self):
+        return asbytes('CDF') + \
+               array(self.version_byte, '>b').tostring() + \
+               self._numrecs() + \
+               self._dim_array() + \
+               self._gatt_array() + \
+               self._var_array()
+
     def _write(self):
-        self.fp.write(asbytes('CDF'))
-        self.fp.write(array(self.version_byte, '>b').tostring())
+        self.fp.writelines(self.__generate__())
 
-        # Write headers and data.
-        self._write_numrecs()
-        self._write_dim_array()
-        self._write_gatt_array()
-        self._write_var_array()
-
-    def _write_numrecs(self):
-        # Get highest record count from all record variables.
-        for var in self.variables.values():
-            if var.isrec and len(var.data) > self._recs:
-                self.__dict__['_recs'] = len(var.data)
-        self._pack_int(self._recs)
-
-    def _write_dim_array(self):
-        if self.dimensions:
-            self.fp.write(NC_DIMENSION)
-            self._pack_int(len(self.dimensions))
-            for name in self._dims:
-                self._pack_string(name)
-                length = self.dimensions[name]
-                self._pack_int(length or 0)  # replace None with 0 for record dimension
-        else:
-            self.fp.write(ABSENT)
-
-    def _write_gatt_array(self):
-        self._write_att_array(self._attributes)
-
-    def _write_att_array(self, attributes):
-        if attributes:
-            self.fp.write(NC_ATTRIBUTE)
-            self._pack_int(len(attributes))
-            for name, values in attributes.items():
-                self._pack_string(name)
-                self._write_values(values)
-        else:
-            self.fp.write(ABSENT)
-
-    def _write_var_array(self):
+    def _data(self):
         if self.variables:
-            self.fp.write(NC_VARIABLE)
-            self._pack_int(len(self.variables))
+            for var in self.variables.values():
+                if (var.data.dtype.byteorder == '<' or
+                    (var.data.dtype.byteorder == '=' and LITTLE_ENDIAN)):
+                    var.data = var.data.byteswap()
+                    
+            for var in self.non_recvars.values():
+                yield var.data.tostring()
+                count = var.data.size * var.data.itemsize
+                yield asbytes('0') * (var._vsize - count)
 
-            # Sort variables non-recs first, then recs. We use a DSU
-            # since some people use pupynere with Python 2.3.x.
-            deco = [ (v._shape and not v.isrec, k) for (k, v) in self.variables.items() ]
-            deco.sort()
-            variables = [ k for (unused, k) in deco ][::-1]
+            # Record variables
+            for i in range(self._recs):
+                for var in self.recvars.values():
+                    stride = var.data[i,:] if len(var.data.shape) > 1 else var.data[i]
+                    yield stride.tostring()
+
+    def _calc_begins(self):
+        '''Each netcdf variable has a metadata item named 'begin' which is an offset to the location in
+           the file where the data values begin. This method calculates the offset for each variable and
+           sets it in the variable property _begin
+        '''
+        prev = False
+        for name, var in self.variables.items():
+            if not prev:
+                var.__dict__['_begin'] = len(self._header())
+            else:
+                var.__dict__['_begin'] = prev._begin + prev._vsize
+            prev = var
+
+    def _numrecs(self):
+        # Get highest record count from all record variables.
+        self.__dict__['_recs'] = 0 if not self.recvars else max([ len(var.data) for var in self.recvars.values() ])
+        return self._pack_int(self._recs)
+
+    def _dim_array(self):
+        if self.dimensions:
+            buf = NC_DIMENSION + self._pack_int(len(self.dimensions))
+            for name in self._dims:
+                buf += self._pack_string(name)
+                length = self.dimensions[name]
+                buf += self._pack_int(length or 0)  # replace None with 0 for record dimension
+            return buf
+        else:
+            return ABSENT
+
+    def _gatt_array(self):
+        return self._att_array(self._attributes)
+
+    def _att_array(self, attributes):
+        if attributes:
+            buf = NC_ATTRIBUTE
+            buf += self._pack_int(len(attributes))
+            for name, values in attributes.items():
+                buf += self._pack_string(name)
+                buf += self._values(values)
+            return buf
+        else:
+            return ABSENT
+
+    def _var_array(self):
+        if self.variables:
+            buf = NC_VARIABLE
+            buf += self._pack_int(len(self.variables))
 
             # Set the metadata for all variables.
-            for name in variables:
-                self._write_var_metadata(name)
+            for name in self.variables.keys():
+                buf += self._var_metadata(name)
             # Now that we have the metadata, we know the vsize of
             # each record variable, so we can calculate recsize.
             self.__dict__['_recsize'] = sum([
-                    var._vsize for var in self.variables.values()
-                    if var.isrec])
-            # Set the data for all variables.
-            for name in variables:
-                self._write_var_data(name)
-        else:
-            self.fp.write(ABSENT)
+                    var._vsize for var in self.recvars.values()
+                    ])
+            return buf
 
-    def _write_var_metadata(self, name):
+        else:
+            return ABSENT
+
+    def _var_metadata(self, name):
+        '''
+        Returns a string representing a single 'var' from the BNF grammar here:
+        http://www.unidata.ucar.edu/software/netcdf/docs/netcdf/File-Format-Specification.html
+        '''
         var = self.variables[name]
 
-        self._pack_string(name)
-        self._pack_int(len(var.dimensions))
+        # name
+        buf = self._pack_string(name)
+
+        # nelems
+        buf += self._pack_int(len(var.dimensions))
+
+        # dimid ...
         for dimname in var.dimensions:
             dimid = self._dims.index(dimname)
-            self._pack_int(dimid)
+            buf += self._pack_int(dimid)
 
-        self._write_att_array(var._attributes)
+        # vatt_array
+        buf += self._att_array(var._attributes)
 
+        # nc_type
         nc_type = REVERSE[var.dtype]
-        self.fp.write(asbytes(nc_type))
+        buf += asbytes(nc_type)
 
+        # vsize
         if not var.isrec:
             vsize = var.data.size * var.data.itemsize
             vsize += -vsize % 4
@@ -390,52 +445,21 @@ class netcdf_file(object):
                 vsize = var.data[0].size * var.data.itemsize
             except IndexError:
                 vsize = 0
-            rec_vars = len([var for var in self.variables.values()
-                    if var.isrec])
-            if rec_vars > 1:
+            if len(self.recvars.items()) > 1:
                 vsize += -vsize % 4
         self.variables[name].__dict__['_vsize'] = vsize
-        self._pack_int(vsize)
+        buf += self._pack_int(vsize)
 
-        # Pack a bogus begin, and set the real value later.
-        self.variables[name].__dict__['_begin'] = self.fp.tell()
-        self._pack_begin(0)
+        # begin
+        # Pack a bogus begin, if it hasn't been calculated yet
+        if hasattr(self.variables[name], '_begin'):
+            buf += self._pack_begin(self.variables[name]._begin)
+        else:
+            buf += self._pack_begin(0)
 
-    def _write_var_data(self, name):
-        var = self.variables[name]
+        return buf
 
-        # Set begin in file header.
-        the_beguine = self.fp.tell()
-        self.fp.seek(var._begin)
-        self._pack_begin(the_beguine)  # http://en.wikipedia.org/wiki/Begin_the_Beguine
-        self.fp.seek(the_beguine)
-
-        # Write data.
-        if (var.data.dtype.byteorder == '<' or
-                (var.data.dtype.byteorder == '=' and LITTLE_ENDIAN)):
-            var.data = var.data.byteswap()
-
-        if not var.isrec:
-            self.fp.write(var.data.tostring())
-            count = var.data.size * var.data.itemsize
-            self.fp.write(asbytes('0') * (var._vsize - count))
-        else:  # record variable
-            # Handle rec vars with shape[0] < nrecs.
-            if self._recs > len(var.data):
-                shape = (self._recs,) + var.data.shape[1:]
-                var.data.resize(shape)
-
-            pos0 = pos = self.fp.tell()
-            for rec in var.data:
-                self.fp.write(rec.tostring())
-                # Padding
-                count = rec.size * rec.itemsize
-                self.fp.write(asbytes('0') * (var._vsize - count))
-                pos += self._recsize
-                self.fp.seek(pos)
-            self.fp.seek(pos0 + var._vsize)
-
-    def _write_values(self, values):
+    def _values(self, values):
         if hasattr(values, 'dtype'):
             nc_type = REVERSE[values.dtype]
         else:
@@ -458,20 +482,21 @@ class netcdf_file(object):
 
         values = asarray(values, TYPEMAP[nc_type])
 
-        self.fp.write(asbytes(nc_type))
+        buf = asbytes(nc_type)
 
         if values.dtype.char == 'S':
             nelems = values.itemsize
         else:
             nelems = values.size
-        self._pack_int(nelems)
+        buf += self._pack_int(nelems)
 
         if not values.shape and (values.dtype.byteorder == '<' or
                 (values.dtype.byteorder == '=' and LITTLE_ENDIAN)):
             values = values.byteswap()
-        self.fp.write(values.tostring())
+        buf += values.tostring()
         count = values.size * values.itemsize
-        self.fp.write(asbytes('0') * (-count % 4))  # pad
+        buf += asbytes('0') * (-count % 4) # pad
+        return buf
 
     def _read(self):
         # Check magic bytes and version
@@ -662,12 +687,12 @@ class netcdf_file(object):
 
     def _pack_begin(self, begin):
         if self.version_byte == 1:
-            self._pack_int(begin)
+            return self._pack_int(begin)
         elif self.version_byte == 2:
-            self._pack_int64(begin)
+            return self._pack_int64(begin)
 
     def _pack_int(self, value):
-        self.fp.write(array(value, '>i').tostring())
+        return array(value, '>i').tostring()
     _pack_int32 = _pack_int
 
     def _unpack_int(self):
@@ -675,16 +700,15 @@ class netcdf_file(object):
     _unpack_int32 = _unpack_int
 
     def _pack_int64(self, value):
-        self.fp.write(array(value, '>q').tostring())
+        return array(value, '>q').tostring()
 
     def _unpack_int64(self):
         return fromstring(self.fp.read(8), '>q')[0]
 
     def _pack_string(self, s):
         count = len(s)
-        self._pack_int(count)
-        self.fp.write(asbytes(s))
-        self.fp.write(asbytes('0') * (-count % 4))  # pad
+        pad = asbytes('0') * (-count % 4)
+        return self._pack_int(count) + asbytes(s) + pad
 
     def _unpack_string(self):
         count = self._unpack_int()
@@ -772,7 +796,7 @@ class netcdf_variable(object):
         `netcdf_variable`.
 
         """
-        return self.data.shape and not self._shape[0]
+        return not self._shape[0] and hasattr(self.data, 'shape') and self.data.shape
     isrec = property(isrec)
 
     def shape(self):
@@ -895,6 +919,21 @@ class netcdf_variable(object):
                 self.data.resize(shape)
         self.data[index] = data
 
+from collections import OrderedDict
+class NcOrderedDict(OrderedDict):
+    '''Store items in the order in which they will be written to the NetCDF file
+       i.e. non-record variables first, followed by record variables'''
+    def __setitem__(self, key, value):
+        if key in self:
+            OrderedDict.__setitem__(self, key, value)
+        else:
+            items = self.items() + [(key, value)] if len(self) > 0 else [(key, value)]
+            reordered = sorted(items, key= lambda t: (t[1]._shape and not t[1].isrec, t[0]))
+            reordered.reverse() # keep the original pupynere ordering for comparison
+            for key in self.keys():
+                del self[key]
+            for key, val in reordered:
+                OrderedDict.__setitem__(self, key, val)
 
 NetCDFFile = netcdf_file
 NetCDFVariable = netcdf_variable
