@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import division
+from warnings import warn
 
 u"""
 NetCDF reader/writer module.
@@ -90,6 +91,7 @@ __all__ = ['netcdf_file']
 
 from operator import mul
 from mmap import mmap, ACCESS_READ
+from os import stat
 try:
     from mmap import ALLOCATIONGRANULARITY
 except ImportError:
@@ -170,24 +172,31 @@ class netcdf_file(object):
     """
     def __init__(self, filename, mode='r', mmap=None, version=1, maskandscale=False):
         """Initialize netcdf_file from fileobj (str or file-like)."""
-        if hasattr(filename, 'seek'):  # file-like
+        if not filename: # Just a metadata object... no reading or writing
+            self.fp = self.filename = self.mode = mode = None
+
+        elif hasattr(filename, 'seek'):  # file-like
             self.fp = filename
             self.filename = 'None'
             if mmap is None:
                 mmap = False
             elif mmap and not hasattr(filename, 'fileno'):
                 raise ValueError('Cannot use file object for mmap')
-        else:  # string?
+
+        elif type(filename) == str:  # string?
             self.filename = filename
             self.fp = open(self.filename, '%sb' % mode)
             if mmap is None:
                 mmap = True
+        else:
+            raise TypeError('filename argument to netcdf_file.__init__() must be of type string, be file-like (have a "seek" attribute) or be None. Instead received', filename)
+
         self.use_mmap = mmap
         self.version_byte = version
         self.maskandscale = maskandscale
 
-        if not mode in 'rw':
-            raise ValueError("Mode must be either 'r' or 'w'.")
+        if not mode in ('r', 'w', None):
+            raise ValueError("Mode must be either 'r', 'w', or None.")
         self.mode = mode
 
         self.dimensions = {}
@@ -213,12 +222,30 @@ class netcdf_file(object):
 
     def close(self):
         """Closes the NetCDF file."""
+        if not self.fp:
+            return
         if not self.fp.closed:
             try:
                 self.flush()
             finally:
                 self.fp.close()
+
     __del__ = close
+
+    @property
+    def filesize(self):
+        """
+        For files on disk, returns the size of the file (in bytes)
+        For virtual files to be generated, returns the expected size of
+        the resulting file after all data has been streamed through
+        """
+        if self.fp:
+            return stat(self.fp.name).st_size
+        else:
+            recvar0 = self.recvars.values()[0]
+            if not hasattr(recvar0, '_begin'):
+                self._calc_begins()
+            return int(recvar0._begin + (self._recs * self._recsize))
 
     def createDimension(self, name, length):
         """
@@ -341,7 +368,7 @@ class netcdf_file(object):
                     
             for var in self.non_recvars.values():
                 yield var.data.tostring()
-                count = var.data.size * var.data.itemsize
+                count = var.data.size * var.itemsize
                 yield asbytes('0') * (var._vsize - count)
 
             # Record variables
@@ -363,9 +390,14 @@ class netcdf_file(object):
                 var.__dict__['_begin'] = prev._begin + prev._vsize
             prev = var
 
+    def set_numrecs(self, numrecs):
+        assert type(numrecs) == int
+        self.__dict__['_recs'] = numrecs
+
     def _numrecs(self):
-        # Get highest record count from all record variables.
-        self.__dict__['_recs'] = 0 if not self.recvars else max([ len(var.data) for var in self.recvars.values() ])
+        if self._recs == 0:
+            # Get highest record count from all record variables.
+            self.__dict__['_recs'] = 0 if not self.recvars else max([ len(var.data) for var in self.recvars.values() ])
         return self._pack_int(self._recs)
 
     def _dim_array(self):
@@ -438,13 +470,14 @@ class netcdf_file(object):
 
         # vsize
         if not var.isrec:
-            vsize = var.data.size * var.data.itemsize
+            vsize = var.data.size * var.itemsize
             vsize += -vsize % 4
         else:  # record variable
             try:
-                vsize = var.data[0].size * var.data.itemsize
+                vsize = np.prod(var.shape[1:]) * var.itemsize
             except IndexError:
                 vsize = 0
+                warn("Could not determine vsize for variable", name, "so I'm defaulting to 0")
             if len(self.recvars.items()) > 1:
                 vsize += -vsize % 4
         self.variables[name].__dict__['_vsize'] = vsize
@@ -796,7 +829,7 @@ class netcdf_variable(object):
         `netcdf_variable`.
 
         """
-        return not self._shape[0] and hasattr(self.data, 'shape') and self.data.shape
+        return (hasattr(self.data, 'shape') and self.data.shape) and (not self._shape[0])
     isrec = property(isrec)
 
     def shape(self):
@@ -871,6 +904,7 @@ class netcdf_variable(object):
 
         """
         return self.dtype.itemsize
+    itemsize = property(itemsize)
 
     def __getitem__(self, index):
         if not self.maskandscale:
@@ -934,6 +968,181 @@ class NcOrderedDict(OrderedDict):
                 del self[key]
             for key, val in reordered:
                 OrderedDict.__setitem__(self, key, val)
+
+
+def coroutine(func):
+    '''A decorator that advances
+    the execution to the first 'yield'
+    in a generator so that this generator
+    is "primed".
+    '''
+    def generator(*args, **kwargs):
+        primed_func = func(*args, **kwargs)
+        primed_func.next()
+        return primed_func
+    return generator
+
+@coroutine
+def byteorderer(target):
+    ''' coroutine to be used in the pipeline with nc_streamer
+        for example when instantiating the pipeline, for source-driven
+        netcdf writing, do something like this:
+
+Examples
+--------
+
+    >>> nc = netcdf_file(None)
+    >>> # add attributes, dimensions and variables to the netcdf_file object
+    >>> pipeline = byteorderer(nc_streamer(nc, nc_writer(filename)))
+    >>> while True:
+    >>>     pipeline.send(stuff)
+
+    '''
+    try:
+        while True:
+            data = (yield)
+            if (data.dtype.byteorder == '<' or
+                (data.dtype.byteorder == '=' and LITTLE_ENDIAN)):
+                data = data.byteswap()
+            target.send(data)
+    except StopIteration:
+        pass
+
+def check_byteorder(input):
+    ''' an iteration-based approach to byteorderer above
+        input should be an iterable of numpy arrays with which to
+        fill the netcdf file
+    '''
+    try:
+        while True:
+            data = input.next()
+            if (data.dtype.byteorder == '<' or
+                (data.dtype.byteorder == '=' and LITTLE_ENDIAN)):
+                data = data.byteswap()
+            yield data
+    except StopIteration:
+        pass
+
+@coroutine
+def nc_streamer(ncfile, target):
+    ''' coroutine implementation for source-driven netcdf generation
+        Parameters
+        ----------
+        ncfile : an instance of netcdf_file
+        target : function which serves as a data "sink",
+                 using yield expressions to consume data sent to it
+
+        Examples
+        --------
+    >>> nc = netcdf_file(None)
+    >>> # add attributes, dimensions and variables to the netcdf_file object
+    >>> pipeline = byteorderer(nc_streamer(nc, nc_writer(filename)))
+    >>> while True:
+    >>>     pipeline.send(stuff)
+
+    '''
+    assert type(ncfile) == netcdf_file
+    count = 0
+    ncfile._calc_begins()
+    target.send(ncfile._header())
+    count += len(ncfile._header())
+    try:
+        if ncfile.variables:
+            for name, var in ncfile.non_recvars.items():
+                end = var._begin + var._vsize if var.dimensions else var._begin
+                while count < end:
+                    data = (yield)
+                    bytes = data.tostring()
+
+                    count += len(bytes)
+                    # padding
+                    if (end - count < data.itemsize):
+                        bytes += asbytes('0') * (end - count)
+                        count = end
+                    target.send(bytes)
+
+            # Record variables... keep taking data until it stops coming
+            while True:
+                vars = ncfile.recvars.values()
+                for i in range(ncfile._recs):
+                    for var in vars:
+                        data = (yield)
+                        bytes = data.tostring()
+                        target.send(bytes)
+                        padding = len(bytes) % 4
+                        if padding:
+                            yield asbytes('0') * padding
+                        count += len(bytes) + padding
+
+    except StopIteration:
+        pass
+
+def nc_generator(ncfile, input):
+    ''' an iteration-based approach to nc_streamer above
+        input should be an iterable of numpy arrays with which to
+        fill the netcdf file
+
+        Examples
+        --------
+    >>> from itertools import chain
+    >>> import numpy
+    >>> nc = netcdf_file(None)
+    >>> # add attributes, dimensions and variables to the netcdf_file object
+    >>> def input():
+    >>>     yield numpy.random(100, 100)
+    >>> def more_input():
+    >>>     yield numpy.arange(10000).reshape(100, 100)
+    >>> pipeline = nc_generator(nc, chain(input, more_input))
+    >>> f = open('foo.nc', 'w')
+    >>> for block in pipeline:
+    >>>     f.write(block)
+
+    '''
+    input = check_byteorder(input)
+    assert type(ncfile) == netcdf_file
+    count = 0
+    ncfile._calc_begins()
+    yield ncfile._header()
+    count += len(ncfile._header())
+
+    try:
+        if ncfile.variables:
+            for name, var in ncfile.non_recvars.items():
+                end = var._begin + var._vsize if var.dimensions else var._begin
+                while count < end:
+                    data = input.next()
+
+                    bytes = data.tostring()
+                    count += len(bytes)
+                    # padding
+                    if (end - count < data.itemsize):
+                        bytes += asbytes('0') * (end - count)
+                        count = end
+                    yield bytes
+
+            # Record variables... keep taking data until it stops coming
+            while True:
+                vars = ncfile.recvars.values()
+                for i in range(ncfile._recs):
+                    for var in vars:
+                        data = input.next()
+
+                        bytes = data.tostring()
+                        yield bytes
+                        padding = len(bytes) % 4
+                        if padding:
+                            yield asbytes('0') * padding
+                        count += len(bytes) + padding
+
+    except StopIteration:
+        pass
+
+@coroutine
+def nc_writer(filename):
+    with open(filename, 'w') as f:
+        while True:
+            bytes = (yield)
+            f.write(bytes)
 
 NetCDFFile = netcdf_file
 NetCDFVariable = netcdf_variable
