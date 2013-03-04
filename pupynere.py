@@ -117,24 +117,38 @@ NC_ATTRIBUTE = asbytes('\x00\x00\x00\x0c')
 
 
 # Map from Netcdf types and how they should be read. Netcdf is big endian.
-TYPEMAP = { NC_BYTE:   dtype(np.byte),
-            NC_CHAR:   dtype('c'),
-            NC_SHORT:  dtype(np.int16).newbyteorder('>'),
-            NC_INT:    dtype(np.int32).newbyteorder('>'),
-            NC_FLOAT:  dtype(np.float32).newbyteorder('>'),
-            NC_DOUBLE: dtype(np.float64).newbyteorder('>'),
+def TYPEMAP(nctype):
+    static = { NC_BYTE:   dtype(np.byte),
+               #NC_CHAR:   dtype('c'),
+               NC_SHORT:  dtype(np.int16).newbyteorder('>'),
+               NC_INT:    dtype(np.int32).newbyteorder('>'),
+               NC_FLOAT:  dtype(np.float32).newbyteorder('>'),
+               NC_DOUBLE: dtype(np.float64).newbyteorder('>'),
             }
+    if nctype in static:
+        return static[nctype]
+    elif nctype == NC_CHAR:
+        return dtype('|S1')
+    else:
+        raise Exception("numpy has no corresponding type to NetCDF3 type %s" % nctype)
 
 # Map between Numpy types and the corresponding Netcdf type.
-REVERSE = { dtype(np.byte):    NC_BYTE,
-            dtype('c'):        NC_CHAR,
-            dtype('<U1'):      NC_INT,
-            dtype(np.int16):   NC_SHORT,
-            dtype(np.int32):   NC_INT,
-            dtype(np.int64):   NC_INT,  # will be converted to int32
-            dtype(np.float32): NC_FLOAT,
-            dtype(np.float64): NC_DOUBLE,
+def REVERSE(nptype):
+    static = { dtype(np.byte):    NC_BYTE,
+               #dtype('c'):        NC_CHAR,
+               dtype('<U1'):      NC_INT,
+               dtype(np.int16):   NC_SHORT,
+               dtype(np.int32):   NC_INT,
+               dtype(np.int64):   NC_INT,  # will be converted to int32
+               dtype(np.float32): NC_FLOAT,
+               dtype(np.float64): NC_DOUBLE,
             }
+    if nptype in static:
+        return static[nptype]
+    elif nptype.char == 'S':
+        return NC_CHAR
+    else:
+        raise Exception("NetCDF 3 does not support type %s" % nptype)
 
 
 class netcdf_file(object):
@@ -241,11 +255,18 @@ class netcdf_file(object):
         """
         if self.fp:
             return stat(self.fp.name).st_size
-        else:
+
+        if self.recvars:
             recvar0 = self.recvars.values()[0]
             if not hasattr(recvar0, '_begin'):
                 self._calc_begins()
             return int(recvar0._begin + (self._recs * self._recsize))
+        else:
+            lastvar = self.non_recvars.values()[-1]
+            if not hasattr(lastvar, '_begin'):
+                self._calc_begins()
+            return int(lastvar._begin + lastvar._vsize)
+
 
     def createDimension(self, name, length):
         """
@@ -309,9 +330,6 @@ class netcdf_file(object):
 
         if isinstance(type, basestring):
             type = dtype(type)
-
-        if type not in REVERSE:
-            raise ValueError("NetCDF 3 does not support type %s" % type)
 
         data = empty(shape_, type)
 
@@ -465,7 +483,7 @@ class netcdf_file(object):
         buf += self._att_array(var._attributes)
 
         # nc_type
-        nc_type = REVERSE[var.dtype]
+        nc_type = REVERSE(var.dtype)
         buf += asbytes(nc_type)
 
         # vsize
@@ -493,9 +511,10 @@ class netcdf_file(object):
         return buf
 
     def _values(self, values):
-        if hasattr(values, 'dtype'):
-            nc_type = REVERSE[values.dtype]
-        else:
+        try:
+            nc_type = REVERSE(values.dtype)
+        except:
+            warn("Failed on values.dtype = ", values.dtype)
             types = [
                     (int, NC_INT),
                     (long, NC_INT),
@@ -513,14 +532,16 @@ class netcdf_file(object):
             for class_, nc_type in types:
                 if isinstance(sample, class_): break
 
-        values = asarray(values, TYPEMAP[nc_type])
-
-        buf = asbytes(nc_type)
-
-        if values.dtype.char == 'S':
+        # Special case for character types
+        # numpy.asarray will detect the length for character types and set dtype accordingly
+        if nc_type == NC_CHAR:
+            values = asarray(values)
             nelems = values.itemsize
         else:
+            values = asarray(values, TYPEMAP(nc_type))
             nelems = values.size
+
+        buf = asbytes(nc_type)
         buf += self._pack_int(nelems)
 
         if not values.shape and (values.dtype.byteorder == '<' or
@@ -696,7 +717,7 @@ class netcdf_file(object):
         nc_type = self.fp.read(4)
         vsize = self._unpack_int()
         start = [self._unpack_int, self._unpack_int64][self.version_byte-1]()
-        type = TYPEMAP[nc_type]
+        type = TYPEMAP(nc_type)
 
         return name, dimensions, shape, attributes, type, start, vsize
 
@@ -704,13 +725,13 @@ class netcdf_file(object):
         nc_type = self.fp.read(4)
         n = self._unpack_int()
 
-        type = TYPEMAP[nc_type]
+        type = TYPEMAP(nc_type)
 
         count = n*type.itemsize
         values = self.fp.read(int(count))
         self.fp.read(-count % 4)  # read padding
 
-        if type.char is not 'c':
+        if type.char not in ('S', 'a'):
             values = fromstring(values, type)
             if values.shape == (1,): values = values[0]
         else:
