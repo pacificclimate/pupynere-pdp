@@ -186,6 +186,10 @@ class netcdf_file(object):
     """
     def __init__(self, filename, mode='r', mmap=None, version=1, maskandscale=False):
         """Initialize netcdf_file from fileobj (str or file-like)."""
+        self._dims = []
+        self._recs = 0
+        self._recsize = 0
+
         if not filename: # Just a metadata object... no reading or writing
             self.fp = self.filename = self.mode = mode = None
 
@@ -215,10 +219,6 @@ class netcdf_file(object):
 
         self.dimensions = {}
         self.variables = NcOrderedDict()
-
-        self._dims = []
-        self._recs = 0
-        self._recsize = 0
 
         self._attributes = {}
 
@@ -288,10 +288,12 @@ class netcdf_file(object):
         createVariable
 
         """
+        if self.dimensions and not length:
+            raise ValueError('Unlimited dimension must be the first dimension of a netcdf file')
         self.dimensions[name] = length
         self._dims.append(name)
 
-    def createVariable(self, name, type, dimensions, attributes=None):
+    def createVariable(self, name, type, dimensions=None, attributes=None):
         """
         Create an empty variable for the `netcdf_file` object, specifying its data
         type and the dimensions it uses.
@@ -325,6 +327,8 @@ class netcdf_file(object):
         creating the NetCDF variable.
 
         """
+        if not dimensions:
+            dimensions = ()
         shape = tuple([self.dimensions[dim] for dim in dimensions])
         shape_ = tuple([dim or 0 for dim in shape])  # replace None with 0 for numpy
 
@@ -715,7 +719,7 @@ class netcdf_file(object):
 
         attributes = self._read_att_array()
         nc_type = self.fp.read(4)
-        vsize = self._unpack_int()
+        vsize = int(fromstring(self.fp.read(4), 'int')[0])
         start = [self._unpack_int, self._unpack_int64][self.version_byte-1]()
         type = TYPEMAP(nc_type)
 
@@ -928,6 +932,9 @@ class netcdf_variable(object):
     itemsize = property(itemsize)
 
     def __getitem__(self, index):
+        # scalar
+        if not self.shape:
+            return self.data.item()
         if not self.maskandscale:
             return self.data[index]
 
