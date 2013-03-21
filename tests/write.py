@@ -19,21 +19,18 @@ class UnlimdimTestCase(unittest.TestCase):
 
     def setUp(self):
         self.file = tempfile.mktemp(".nc")
-        f  = pupynere.netcdf_file(self.file, 'w')
-        # foo has a single unlimited dimension
-        f.createDimension('n1', n1dim)
-        with self.assertRaises(ValueError):
-            f.createDimension('n2', None)
-        f.close()
 
     def tearDown(self):
         # Remove the temporary files
         os.remove(self.file)
 
     def runTest(self):
-        """testing unlimited dimensions"""
-        f = pupynere.netcdf_file(self.file, 'r')
-        self.assert_(f.dimensions == {'n1': n1dim})
+        """should not be able to create a non-first unlimited dimension"""
+        f = pupynere.netcdf_file(self.file, 'w')
+        f.createDimension('n1', n1dim)
+        with self.assertRaises(ValueError):
+            f.createDimension('n2', None)
+        self.assertEquals(f.dimensions, {'n1': n1dim})
         f.close()
 
 class FirstUnlimdimTestCase(unittest.TestCase):
@@ -47,16 +44,13 @@ class FirstUnlimdimTestCase(unittest.TestCase):
         f.createDimension('n3', n3dim)
         foo = f.createVariable('data1', ranarr.dtype.str[1:], ('n1','n2','n3'))
         # write some data to it.
-        #foo[:,0:n2dim,:] = ranarr 
         foo[:] = ranarr 
         foo[n1dim:,:,:] = 2.*ranarr
         f.close()
 
     def tearDown(self):
         # Remove the temporary files
-        #os.remove(self.file)
-        print self.file
-        pass
+        os.remove(self.file)
 
     def runTest(self):
         """testing unlimited dimensions"""
@@ -68,6 +62,9 @@ class FirstUnlimdimTestCase(unittest.TestCase):
         self.assertTrue((foo[0:n1dim,:,:] == ranarr).all())
         self.assertTrue((foo[n1dim:3*n1dim,:,:] == 2.*ranarr).all())
         f.close()
+
+class GreaterThanFourGB(unittest.TestCase):
+    pass
 
 if __name__ == '__main__':
     unittest.main()

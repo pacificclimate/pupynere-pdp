@@ -503,7 +503,11 @@ class netcdf_file(object):
             if len(self.recvars.items()) > 1:
                 vsize += -vsize % 4
         self.variables[name].__dict__['_vsize'] = vsize
-        buf += self._pack_int(vsize)
+        # But according to "Note on vsize:" from NetCDF spec, vsize is:
+        # a) redundant, since it can be determined from other header info
+        # b) insufficient, since it's only 32 bits and files can be > 4GB
+        # therefore, clip it... the spec made me do it!
+        buf += array(min(vsize, 2**32 - 4), 'int32').tostring()
 
         # begin
         # Pack a bogus begin, if it hasn't been calculated yet
@@ -719,7 +723,8 @@ class netcdf_file(object):
 
         attributes = self._read_att_array()
         nc_type = self.fp.read(4)
-        vsize = int(fromstring(self.fp.read(4), 'int')[0])
+        vsize = int(fromstring(self.fp.read(4), 'int32')[0])
+
         start = [self._unpack_int, self._unpack_int64][self.version_byte-1]()
         type = TYPEMAP(nc_type)
 
