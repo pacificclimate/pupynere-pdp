@@ -213,6 +213,7 @@ class netcdf_file(object):
         self.version_byte = version
         self.maskandscale = maskandscale
 
+        # FIXME: We need an append mode
         if not mode in ('r', 'w', None):
             raise ValueError("Mode must be either 'r', 'w', or None.")
         self.mode = mode
@@ -331,6 +332,9 @@ class netcdf_file(object):
             dimensions = ()
         shape = tuple([self.dimensions[dim] for dim in dimensions])
         shape_ = tuple([dim or 0 for dim in shape])  # replace None with 0 for numpy
+
+        if None in shape and shape.index(None) != 0:
+            raise ValueError("Unlimited dimension must be the first dimensionn to variable %s. Instead got dimension number %d" % (name, shape.index(None)))
 
         if isinstance(type, basestring):
             type = dtype(type)

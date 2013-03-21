@@ -15,22 +15,23 @@ n2dim = 10
 n3dim = 8
 ranarr = 100.*NP.zeros(shape=(n1dim,n2dim,n3dim))
 
-class UnlimdimTestCase(unittest.TestCase):
-
-    def setUp(self):
-        self.file = tempfile.mktemp(".nc")
-
-    def tearDown(self):
-        # Remove the temporary files
-        os.remove(self.file)
-
-    def runTest(self):
+class UnlimdimFailures(unittest.TestCase):
+    def test_non_first_unlim_dim(self):
         """should not be able to create a non-first unlimited dimension"""
-        f = pupynere.netcdf_file(self.file, 'w')
+        f = pupynere.netcdf_file(None, 'w')
         f.createDimension('n1', n1dim)
         with self.assertRaises(ValueError):
             f.createDimension('n2', None)
         self.assertEquals(f.dimensions, {'n1': n1dim})
+
+    def test_non_first_unlim_dim_var(self):
+        """should not be able to create a variable where the unlimited
+           dimension is not first"""
+        f = pupynere.netcdf_file(None, 'w')
+        f.createDimension('n1', None)
+        f.createDimension('n2', n2dim)
+        with self.assertRaises(ValueError):
+            f.createVariable('data1', None, ('n2', 'n1'))
         f.close()
 
 class FirstUnlimdimTestCase(unittest.TestCase):
