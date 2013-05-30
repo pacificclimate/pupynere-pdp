@@ -33,7 +33,7 @@ class ScalarVariableTestCase(unittest.TestCase):
         os.remove(self.file)
 
     def runTest(self):
-        """testing scalar variables"""
+        """Testing scalar variables"""
         # check dimensions in root group.
         f  = pupynere.netcdf_file(self.file, 'r')
         v = f.variables[VAR_NAME]
