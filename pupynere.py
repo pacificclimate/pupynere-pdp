@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import division
 from warnings import warn
+from logging import debug
 
 u"""
 NetCDF reader/writer module.
@@ -467,6 +468,7 @@ class netcdf_file(object):
             return buf
 
         else:
+            debug("_var_array returning ABSENT")
             return ABSENT
 
     def _var_metadata(self, name):
@@ -522,11 +524,12 @@ class netcdf_file(object):
 
         return buf
 
+    # FIXME: This is a little messy... the try/except blocks don't really express the program logic in a good way
     def _values(self, values):
         try:
             nc_type = REVERSE(values.dtype)
         except:
-            warn("Failed on values.dtype = ", values.dtype)
+            #warn("Failed on values.dtype = ", values.dtype) # FIXME: if REVERSE(values.dtype) raises an attribute error then so will this!
             types = [
                     (int, NC_INT),
                     (long, NC_INT),
@@ -543,6 +546,7 @@ class netcdf_file(object):
                 values = values.encode('utf-8')
             for class_, nc_type in types:
                 if isinstance(sample, class_): break
+            # FIXME: raise exception here? If we get to this point... nc_type is undefined
 
         # Special case for character types
         # numpy.asarray will detect the length for character types and set dtype accordingly
@@ -601,6 +605,11 @@ class netcdf_file(object):
         header = self.fp.read(4)
         if not header in [ZERO, NC_ATTRIBUTE]:
             raise ValueError("Unexpected header.")
+        if header == ZERO:
+            more = self.fp.read(4)
+            assert more == ZERO
+            return {}
+            
         count = self._unpack_int()
 
         attributes = {}
@@ -614,6 +623,11 @@ class netcdf_file(object):
         if not header in [ZERO, NC_VARIABLE]:
             raise ValueError("Unexpected header.")
 
+        if header == ZERO:
+            more = self.fp.read(4)
+            assert more == ZERO
+            return            
+        
         records = 0
         dtypes = {'names': [], 'formats': []}
         rec_vars = []
