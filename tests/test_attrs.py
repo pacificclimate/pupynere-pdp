@@ -1,17 +1,14 @@
 import math
-import sys
 import unittest
 import os
 import tempfile
 import numpy as NP
-from numpy.random.mtrand import uniform 
 from pupynere import netcdf_file as netCDF4
 from numpy.testing import assert_almost_equal
 
 # test attribute creation.
 FILE_NAME = tempfile.mktemp(".nc")
 VAR_NAME="dummy_var"
-GROUP_NAME = "dummy_group"
 DIM1_NAME="x"
 DIM1_LEN=2
 DIM2_NAME="y"
@@ -23,10 +20,6 @@ EMPTYSTRATT = ''
 INTATT = 1
 FLOATATT = math.pi
 SEQATT = NP.arange(10)
-ATTDICT = {'stratt':STRATT,'floatatt':FLOATATT,'seqatt':SEQATT,
-           'emptystratt':EMPTYSTRATT,
-           'intatt':INTATT
-}
 
 class AttributesTestCase(unittest.TestCase):
 
