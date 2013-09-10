@@ -15,7 +15,7 @@ Topic :: Scientific/Engineering
 Topic :: Software Development :: Libraries :: Python Modules
 """
 
-version = '1.1.2a1'
+version = '1.1.2a2'
 
 setup(
         name='pupynere',

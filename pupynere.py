@@ -224,6 +224,7 @@ class netcdf_file(object):
 
         self._attributes = {}
 
+        # FIXME: Really? Read the entire thing into memory? That seems like a bad choice
         if mode == 'r':
             self._read()
 
@@ -259,6 +260,8 @@ class netcdf_file(object):
             return stat(self.fp.name).st_size
 
         if self.recvars:
+            if not self._recs:
+                raise ValueError("The number or records is not set so it is impossible to calculate the filesize")
             recvar0 = self.recvars.values()[0]
             if not hasattr(recvar0, '_begin'):
                 self._calc_begins()
@@ -526,10 +529,14 @@ class netcdf_file(object):
 
     # FIXME: This is a little messy... the try/except blocks don't really express the program logic in a good way
     def _values(self, values):
+        # FIXME: what exactly do we do for arrays of characters? e.g. ['mary', 'had', 'a', 'little', 'lamb']
+        # I think that they are illegal, actually
+        if type(values) == list:
+            raise ValueError("I don't know how to handle a python list type. 'values' parameter should be a numpy array.")
         try:
             nc_type = REVERSE(values.dtype)
         except:
-            #warn("Failed on values.dtype = ", values.dtype) # FIXME: if REVERSE(values.dtype) raises an attribute error then so will this!
+            # FIXME: if REVERSE(values.dtype) raises an attribute error then so will this!
             types = [
                     (int, NC_INT),
                     (long, NC_INT),
@@ -1171,10 +1178,10 @@ def nc_generator(ncfile, input):
                         count = end
                     yield bytes
 
-            # Record variables... keep taking data until it stops coming
+            # Record variables... keep taking data until it stops coming (i.e. a StopIteration is raised)
             while True:
                 vars = ncfile.recvars.values()
-                for i in range(ncfile._recs):
+                while True:
                     for var in vars:
                         data = input.next()
 
