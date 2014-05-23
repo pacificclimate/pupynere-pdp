@@ -18,7 +18,7 @@ Topic :: Software Development :: Libraries :: Python Modules
 version = '1.1.2a2'
 
 setup(
-        name='pupynere',
+        name='pupynere-pdp',
         version=version,
         description="NetCDF file reader and writer.",
         long_description="""\
