@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import division
 from warnings import warn
-from logging import debug
+import logging
 
 u"""
 NetCDF reader/writer module.
@@ -116,6 +116,7 @@ NC_DIMENSION = asbytes('\x00\x00\x00\n')
 NC_VARIABLE  = asbytes('\x00\x00\x00\x0b')
 NC_ATTRIBUTE = asbytes('\x00\x00\x00\x0c')
 
+logger = logging.getLogger(__name__)
 
 # Map from Netcdf types and how they should be read. Netcdf is big endian.
 def TYPEMAP(nctype):
@@ -477,7 +478,7 @@ class netcdf_file(object):
             return buf
 
         else:
-            debug("_var_array returning ABSENT")
+            logger.debug("_var_array returning ABSENT")
             return ABSENT
 
     def _var_metadata(self, name):
