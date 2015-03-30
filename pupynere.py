@@ -1171,7 +1171,7 @@ def nc_generator(ncfile, input):
     count += len(ncfile._header())
 
     try:
-        if ncfile.variables:
+        if ncfile.variables and ncfile.non_recvars:
             for name, var in ncfile.non_recvars.items():
                 end = var._begin + var._vsize if var.dimensions else var._begin
                 while count < end:
@@ -1185,7 +1185,8 @@ def nc_generator(ncfile, input):
                         count = end
                     yield bytes
 
-            # Record variables... keep taking data until it stops coming (i.e. a StopIteration is raised)
+        # Record variables... keep taking data until it stops coming (i.e. a StopIteration is raised)
+        if ncfile.variables and ncfile.recvars:
             while True:
                 vars = ncfile.recvars.values()
                 while True:
