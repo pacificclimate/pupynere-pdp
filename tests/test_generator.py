@@ -12,20 +12,16 @@ from itertools import chain
 n1dim = 4
 n2dim = 3
 n3dim = 3
-#arr = np.arange(n1dim*n2dim*n3dim).reshape(n1dim, n2dim, n3dim)
 arr = np.random.rand(n1dim, n2dim, n3dim).astype(np.float32)
 
 FILE_NAME = tempfile.mktemp(".nc")
-FILE_NAME = 'in.nc' # Change to tempfile once testing verified
 OUT_FILE = tempfile.mktemp(".nc")
-OUT_FILE = 'foo.nc' # Change to tempfile once testing verified
 
 class NcGeneratorWithRecVarsTestCase(unittest.TestCase):
 
     def setUp(self):
-        self.file = FILE_NAME
         self.outfile = OUT_FILE
-        nc = pupynere.netcdf_file(self.file, 'w')
+        nc = pupynere.netcdf_file(None)
         # add attributes, dimensions and variables to the netcdf_file object
         nc.createDimension('n1', None)
         nc.createDimension('n2', n2dim)
@@ -35,10 +31,6 @@ class NcGeneratorWithRecVarsTestCase(unittest.TestCase):
         v1[:] = arr
         self.nc = nc
 
-    def tearDown(self):
-        # Remove the temporary files
-        os.remove(self.file)
-
     def runTest(self):
         """Testing iterating over files with unlimited dimensions"""
         nc = self.nc
@@ -47,16 +39,18 @@ class NcGeneratorWithRecVarsTestCase(unittest.TestCase):
         print nc.variables['data1'][:]
         print nc.non_recvars.items()
         pipeline = pupynere.nc_generator(nc, chain(arr))
-        n_out = open(self.outfile, 'w')
-        for block in pipeline:
-            n_out.write(block)
+        with open(self.outfile, 'w') as n_out:
+            for block in pipeline:
+                n_out.write(block)
+
+    def tearDown(self):
+        os.remove(self.outfile)
 
 class NcGeneratorNoRecVarsTestCase(unittest.TestCase):
 
     def setUp(self):
-        self.file = FILE_NAME
         self.outfile = OUT_FILE
-        nc = pupynere.netcdf_file(self.file, 'w')
+        nc = pupynere.netcdf_file(None)
         # add attributes, dimensions and variables to the netcdf_file object
         nc.createDimension('n1', n1dim)
         nc.createDimension('n2', n2dim)
@@ -73,10 +67,12 @@ class NcGeneratorNoRecVarsTestCase(unittest.TestCase):
         print nc.variables['data1'][:]
         print nc.non_recvars.items()
         pipeline = pupynere.nc_generator(nc, chain(arr))
-        n_out = open(self.outfile, 'w')
-        for block in pipeline:
-            n_out.write(block)
+        with open(self.outfile, 'w') as n_out:
+            for block in pipeline:
+                n_out.write(block)
 
+    def tearDown(self):
+        os.remove(self.outfile)
 
 if __name__ == '__main__':
     unittest.main()
