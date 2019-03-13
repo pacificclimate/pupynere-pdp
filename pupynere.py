@@ -192,6 +192,7 @@ class netcdf_file(object):
         self._recs = 0
         self._recsize = 0
 
+
         if not filename: # Just a metadata object... no reading or writing
             self.fp = self.filename = self.mode = mode = None
 
@@ -472,9 +473,14 @@ class netcdf_file(object):
                 buf += self._var_metadata(name)
             # Now that we have the metadata, we know the vsize of
             # each record variable, so we can calculate recsize.
-            self.__dict__['_recsize'] = sum([
-                    var._vsize for var in self.recvars.values()
-                    ])
+            if self.recvars:
+                lastvar = self.recvars.values()[-1]
+                # The vsize for all record variables is the space per record
+                recsize = lastvar._vsize
+                padding = recsize % 4
+                self.__dict__['_recsize'] = recsize + padding
+            else:
+                self.__dict__['_recsize'] = 0
             return buf
 
         else:
@@ -510,14 +516,21 @@ class netcdf_file(object):
         if not var.isrec:
             vsize = var.data.size * var.itemsize
             vsize += -vsize % 4
-        else:  # record variable
+        else:  # record variable: vsize is the amount of space per record
+               # The record size is calculated as the sum of the vsize's of the
+               # record variables
             try:
                 vsize = np.prod(var.shape[1:]) * var.itemsize
             except IndexError:
                 vsize = 0
                 warn("Could not determine vsize for variable", name, "so I'm defaulting to 0")
             if len(self.recvars.items()) > 1:
-                vsize += -vsize % 4
+                vsize = sum([np.prod(var_.shape[1:]) * var_.itemsize for var_ in self.recvars.values()])
+                vsize += vsize % 4
+            elif len(self.recvars.items()) == 1:
+                vsize = np.prod(self.recvars.values[0].shape[1:]) * var.itemsize
+            else:
+                raise Exception("No record variables. Why are we here?!? Not really sure what to do here")
         self.variables[name].__dict__['_vsize'] = vsize
         # But according to "Note on vsize:" from NetCDF spec, vsize is:
         # a) redundant, since it can be determined from other header info
@@ -1195,6 +1208,11 @@ def nc_generator(ncfile, input):
 
                         bytes = data.tostring()
                         yield bytes
+                        
+                        # This is not per the NetCDF spec. The spec says to fill a
+                        # variable's fill-value. But that doesn't make sense in
+                        # this context where there are multiple variable and could
+                        # have different length fill-values!
                         padding = len(bytes) % 4
                         if padding:
                             yield asbytes('0') * padding
