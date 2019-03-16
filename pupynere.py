@@ -1197,19 +1197,26 @@ def nc_generator(ncfile, input):
                 end = var._begin + var._vsize if var.dimensions else var._begin
                 assert count == var._begin
                 logger.debug("Writing non_recvar %s, bytes %d-%d", name, count, end)
-                while count < end:
+
+                length = var.data.size * var.itemsize
+
+                while count < var._begin + length:
                     data = input.next()
-                    logger.debug(data.byteswap())
 
                     bytes = data.tostring()
+                    logger.debug("Received %s, type %s, length %d bytes", data.byteswap(), data.dtype, len(bytes))
+
                     count += len(bytes)
                     logger.debug("count %d", count)
-                    # padding
-                    if (end - count < var._vsize):
-                        logger.debug("Let's do some padding %d in variable %s", end-count, name)
-                        bytes += asbytes('0') * (end - count)
-                        count = end
                     yield bytes
+
+                # padding
+                if (end - count < var._vsize):
+                    logger.debug("Let's do some padding %d in variable %s", end-count, name)
+                    bytes = asbytes('0') * (end - count)
+                    count = end
+                    yield bytes
+
 
         # Record variables... keep taking data until it stops coming (i.e. a StopIteration is raised)
         if ncfile.variables and ncfile.recvars:
