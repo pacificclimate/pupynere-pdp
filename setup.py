@@ -15,7 +15,7 @@ Topic :: Scientific/Engineering
 Topic :: Software Development :: Libraries :: Python Modules
 """
 
-version = '1.1.3'
+version = '1.1.4'
 
 setup(
         name='pupynere-pdp',
