@@ -103,6 +103,8 @@ from numpy.compat import asbytes, asstr
 from numpy import fromstring, ndarray, dtype, empty, array, asarray
 from numpy import little_endian as LITTLE_ENDIAN
 
+logger = logging.getLogger('__name__')
+
 
 ABSENT       = asbytes('\x00\x00\x00\x00\x00\x00\x00\x00')
 ZERO         = asbytes('\x00\x00\x00\x00')
@@ -191,6 +193,7 @@ class netcdf_file(object):
         self._dims = []
         self._recs = 0
         self._recsize = 0
+
 
         if not filename: # Just a metadata object... no reading or writing
             self.fp = self.filename = self.mode = mode = None
@@ -472,9 +475,24 @@ class netcdf_file(object):
                 buf += self._var_metadata(name)
             # Now that we have the metadata, we know the vsize of
             # each record variable, so we can calculate recsize.
-            self.__dict__['_recsize'] = sum([
+            if self.recvars:
+                logger.debug([(key, v.dtype, v.shape) for key, v in self.recvars.items()])
+                recsize = sum([
                     var._vsize for var in self.recvars.values()
-                    ])
+                ])
+                # From the spec: "A special case: Where there is
+                # exactly one record variable, we drop the restriction
+                # that each record be four-byte aligned, so in this
+                # case there is no record padding."
+                if len(self.recvars) > 1:
+                    padding = recsize % 4
+                else:
+                    padding = 0
+                
+                logger.debug("Recsize %d padding %d total %d", recsize, padding, recsize + padding)
+                self.__dict__['_recsize'] = recsize + padding
+            else:
+                self.__dict__['_recsize'] = 0
             return buf
 
         else:
@@ -510,14 +528,16 @@ class netcdf_file(object):
         if not var.isrec:
             vsize = var.data.size * var.itemsize
             vsize += -vsize % 4
-        else:  # record variable
+        else:  # record variable: vsize is the amount of space per record
+               # The record size is calculated as the sum of the vsize's of the
+               # record variables
             try:
                 vsize = np.prod(var.shape[1:]) * var.itemsize
+                vsize += vsize % 4
             except IndexError:
                 vsize = 0
                 warn("Could not determine vsize for variable", name, "so I'm defaulting to 0")
-            if len(self.recvars.items()) > 1:
-                vsize += -vsize % 4
+
         self.variables[name].__dict__['_vsize'] = vsize
         # But according to "Note on vsize:" from NetCDF spec, vsize is:
         # a) redundant, since it can be determined from other header info
@@ -1121,7 +1141,8 @@ def nc_streamer(ncfile, target):
 
                     count += len(bytes)
                     # padding
-                    if (end - count < data.itemsize):
+                    if (end - count < var._vsize):
+                        logger.debug("Lets do some padding %d", end-count)
                         bytes += asbytes('0') * (end - count)
                         count = end
                     target.send(bytes)
@@ -1174,16 +1195,28 @@ def nc_generator(ncfile, input):
         if ncfile.variables and ncfile.non_recvars:
             for name, var in ncfile.non_recvars.items():
                 end = var._begin + var._vsize if var.dimensions else var._begin
-                while count < end:
+                assert count == var._begin
+                logger.debug("Writing non_recvar %s, bytes %d-%d", name, count, end)
+
+                length = var.data.size * var.itemsize
+
+                while count < var._begin + length:
                     data = input.next()
 
                     bytes = data.tostring()
+                    logger.debug("Received %s, type %s, length %d bytes", data.byteswap(), data.dtype, len(bytes))
+
                     count += len(bytes)
-                    # padding
-                    if (end - count < data.itemsize):
-                        bytes += asbytes('0') * (end - count)
-                        count = end
+                    logger.debug("count %d", count)
                     yield bytes
+
+                # padding
+                if (end - count < var._vsize):
+                    logger.debug("Let's do some padding %d in variable %s", end-count, name)
+                    bytes = asbytes('0') * (end - count)
+                    count = end
+                    yield bytes
+
 
         # Record variables... keep taking data until it stops coming (i.e. a StopIteration is raised)
         if ncfile.variables and ncfile.recvars:
@@ -1195,6 +1228,11 @@ def nc_generator(ncfile, input):
 
                         bytes = data.tostring()
                         yield bytes
+                        
+                        # This is not per the NetCDF spec. The spec says to fill a
+                        # variable's fill-value. But that doesn't make sense in
+                        # this context where there are multiple variable and could
+                        # have different length fill-values!
                         padding = len(bytes) % 4
                         if padding:
                             yield asbytes('0') * padding
