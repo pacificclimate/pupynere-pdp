@@ -1041,17 +1041,23 @@ class netcdf_variable(object):
 from collections import OrderedDict
 class NcOrderedDict(OrderedDict):
     '''Store items in the order in which they will be written to the NetCDF file
-       i.e. non-record variables first, followed by record variables'''
+       i.e. non-record variables sorted by size, followed by record variables'''
     def __setitem__(self, key, value):
         if key in self:
             OrderedDict.__setitem__(self, key, value)
         else:
             items = self.items() + [(key, value)] if len(self) > 0 else [(key, value)]
-            reordered = sorted(items, key= lambda t: (t[1]._shape and not t[1].isrec, t[0]))
-            reordered.reverse() # keep the original pupynere ordering for comparison
+            recvars = [v for v in items if v[1].isrec]
+            nonrecvars = [v for v in items if not v[1].isrec]
+            def variableDiskSize(v):
+                return v.itemsize * reduce(lambda a, b: a * b, v.shape)
+            nonrecvars.sort(key=lambda v: variableDiskSize(v[1]))
+
             for key in self.keys():
                 del self[key]
-            for key, val in reordered:
+            for key, val in nonrecvars:
+                OrderedDict.__setitem__(self, key, val)
+            for key, val in recvars:
                 OrderedDict.__setitem__(self, key, val)
 
 
