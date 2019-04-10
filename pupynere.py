@@ -1050,7 +1050,10 @@ class NcOrderedDict(OrderedDict):
             recvars = [v for v in items if v[1].isrec]
             nonrecvars = [v for v in items if not v[1].isrec]
             def variableDiskSize(v):
-                return v.itemsize * reduce(lambda a, b: a * b, v.shape)
+                if not v or v.data is None or len(v.shape) == 0:
+                    return 0
+                else:
+                    return v.itemsize * reduce(lambda a, b: a * b, v.shape)
             nonrecvars.sort(key=lambda v: variableDiskSize(v[1]))
 
             for key in self.keys():
