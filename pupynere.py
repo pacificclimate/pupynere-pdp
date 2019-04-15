@@ -1053,7 +1053,7 @@ class NcOrderedDict(OrderedDict):
                 if not v or v.data is None or len(v.shape) == 0:
                     return 0
                 else:
-                    return v.itemsize * reduce(lambda a, b: a * b, v.shape)
+                    return v.itemsize * np.prod(v.shape)
             nonrecvars.sort(key=lambda v: variableDiskSize(v[1]))
 
             for key in self.keys():
