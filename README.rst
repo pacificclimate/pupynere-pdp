@@ -44,3 +44,17 @@ To read the NetCDF file we just created::
     >>> print time[-1]
     9
     >>> f.close()
+
+Running Tests
+---------------
+
+Tests can be run in a virutal environment with pytest:
+
+::
+	virtualenv venv
+	source venv/bin/activate
+	pip install .
+	pip install pytest
+	pytest
+
+

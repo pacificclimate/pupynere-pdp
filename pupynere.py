@@ -346,15 +346,25 @@ class netcdf_file(object):
 
         shape = tuple([self.dimensions[dim] for dim in dimensions])
         shape_ = tuple([dim or 0 for dim in shape])  # replace None with 0 for numpy
+        
+        # do not allocate space for data at this time
+        # if this file is streamed, we won't use space for data at all.
+        # if this file is not streamed, allocate space when it's written to.
+        # TODO: add a check that only does this for oversize variables.
+        if None not in shape:
+            shape_ = (0,) + shape[1:]
 
         if None in shape and shape.index(None) != 0:
-            raise ValueError("Unlimited dimension must be the first dimensionn to variable %s. Instead got dimension number %d" % (name, shape.index(None)))
+            raise ValueError("Unlimited dimension must be the first dimension to variable %s. Instead got dimension number %d" % (name, shape.index(None)))
 
         if isinstance(type, basestring):
             type = dtype(type)
-
+        # don't allocate any data at this time.
         data = empty(shape_, type)
 
+        print("shape in create = {}".format(shape))
+
+        print("DATA = {}, shape_ = {}, data.shape = {}".format(data, shape_, data.shape))
         self.variables[name] = netcdf_variable(
                 data, type, shape, dimensions,
                 maskandscale=self.maskandscale,
@@ -405,8 +415,14 @@ class netcdf_file(object):
                 if (var.data.dtype.byteorder == '<' or
                     (var.data.dtype.byteorder == '=' and LITTLE_ENDIAN)):
                     var.data = var.data.byteswap()
-                    
+
+            # even though these are not record variables, we treat them in a similar
+            # way: yielding one slice at a time. The dimension that is sliced along
+            # is the first dimension.
             for var in self.non_recvars.values():
+                print("YIELDING A NON RECVAR {}".format(var))
+                #assert(False)
+                
                 yield var.data.tostring()
                 count = var.data.size * var.itemsize
                 yield asbytes('0') * (var._vsize - count)
@@ -426,8 +442,10 @@ class netcdf_file(object):
         for name, var in self.variables.items():
             if not prev:
                 var.__dict__['_begin'] = len(self._header())
+                print("variable {} is first, and begins at {}".format(name, len(self._header())))
             else:
                 var.__dict__['_begin'] = prev._begin + prev._vsize
+                print("variable {} begins at {} + {} = {}".format(name, prev._begin, prev._vsize, prev._begin + prev._vsize ))
             prev = var
 
     def set_numrecs(self, numrecs):
@@ -524,19 +542,59 @@ class netcdf_file(object):
         nc_type = REVERSE(var.dtype)
         buf += asbytes(nc_type)
 
-        # vsize
-        if not var.isrec:
-            vsize = var.data.size * var.itemsize
-            vsize += -vsize % 4
-        else:  # record variable: vsize is the amount of space per record
+        # vsize 
+        # for non-record variables, vsize is the entire variable size
+        try:
+            if not var.isrec:
+                # the size of a nonrecord variable is defined in the spec
+                # as the size needed to write the entire variable.
+                # calculate it from the dimensions.
+                #todo: handle dimensionless variables?
+                vsize = var.itemsize
+                print("itemsize of {} is {}".format(name, var.itemsize))
+                for d in var.dimensions:
+                    print("dimension {} of {} has length {}".format(d, name, self.dimensions[d]))
+                    vsize = vsize * self.dimensions[d]
+#                vsize = np.prod(var.shape) * var.itemsize
+                vsize += 4 - (vsize%4) if vsize % 4 else 0
+                
+            else:
+                # the size of a record variable is defined in the spec as
+                # the amount of space per record.
+                vsize = np.prod(var.shape[1:]) * var.itemsize
+                vsize += 4 - (vsize % 4)
+        except IndexError:
+            vsize = 0
+            warn("Could no determine vsize for variable {} so I'm defaulting to 0".format(name))
+        
+        print("dimensions of {} are {}".format(name, var.dimensions))               
+        print("vsize of {} is {}".format(name, vsize))
+        
+        
+        # begin experimental code
+        # try:
+        #    vsize = np.prod(var.shape[1:]) * var.itemsize
+        #    vsize += 4 - (vsize % 4)
+        # except IndexError:
+        #    vsize = 0
+        #    warn("Could no determine vsize for variable {} so I'm defaulting to 0".format(name))
+        #print("Shape of variable {} is {}, {}".format(name, var.shape, np.prod(var.shape[1:])))
+        #print("Itemsize of variable {} is {}".format(name, var.itemsize))
+        #print("Size of variable {} is {}".format(name, vsize))
+        # end experimental code
+        
+        #if not var.isrec:
+        #    vsize = var.data.size * var.itemsize
+        #    vsize += -vsize % 4
+        #else:  # record variable: vsize is the amount of space per record
                # The record size is calculated as the sum of the vsize's of the
                # record variables
-            try:
-                vsize = np.prod(var.shape[1:]) * var.itemsize
-                vsize += vsize % 4
-            except IndexError:
-                vsize = 0
-                warn("Could not determine vsize for variable", name, "so I'm defaulting to 0")
+        #    try:
+        #        vsize = np.prod(var.shape[1:]) * var.itemsize
+        #        vsize += vsize % 4
+        #    except IndexError:
+        #        vsize = 0
+        #        warn("Could not determine vsize for variable", name, "so I'm defaulting to 0")
 
         self.variables[name].__dict__['_vsize'] = vsize
         # But according to "Note on vsize:" from NetCDF spec, vsize is:
@@ -555,7 +613,9 @@ class netcdf_file(object):
         return buf
 
     # FIXME: This is a little messy... the try/except blocks don't really express the program logic in a good way
+    # What does this do?
     def _values(self, values):
+        # print("BEGINNING NETCDF_FILE._VALUES")
         # FIXME: what exactly do we do for arrays of characters? e.g. ['mary', 'had', 'a', 'little', 'lamb']
         # I think that they are illegal, actually
         if type(values) == list:
@@ -888,6 +948,8 @@ class netcdf_variable(object):
         self._shape = shape
         self.dimensions = dimensions
         self.maskandscale = maskandscale
+        
+        #print("INITING VARIABLE, DATA = {}, data.shape - {}".format(data, data.shape))
 
         self._attributes = attributes or {}
         for k, v in self._attributes.items():
@@ -911,7 +973,12 @@ class netcdf_variable(object):
         `netcdf_variable`.
 
         """
-        return (hasattr(self.data, 'shape') and self.data.shape) and (not self._shape[0])
+        print("ISREC: {}".format(self.data))
+        print("ISREC: {}".format(self.data.shape))
+        print("ISREC self._shape: {}".format(self._shape))
+        return (hasattr(self.data, 'shape') and\
+                self.data.shape) and\
+                (not self._shape[0])
     isrec = property(isrec)
 
     def shape(self):
@@ -920,7 +987,13 @@ class netcdf_variable(object):
         This is a read-only attribute and can not be modified in the
         same manner of other numpy arrays.
         """
-        return self.data.shape
+        print("BEGINNING NETCDF_VARIABLE.SHAPE")
+        return self.data.shape if self.isrec else self._shape
+        # return self.data.shape
+        # for recordvariables, self.data.shape == self._shape. 
+        # But for non record variables, that's not true. Return ._shape instead.
+        
+        return self._shape
     shape = property(shape)
 
     def getValue(self):
@@ -1036,6 +1109,12 @@ class netcdf_variable(object):
             if recs > len(self.data):
                 shape = (recs,) + self._shape[1:]
                 self.data.resize(shape)
+        # if nonrecord data has not yet been allocated, allocate it.
+        elif self.data.shape[0] == 0:
+            print("ALLOCATING SPACE FOR DATA")
+            self.data = empty(self.shape, self.dtype)                
+            print("ATTEMPTING TO SET UNALLOCATED DATA.")
+            
         self.data[index] = data
 
 from collections import OrderedDict
@@ -1051,8 +1130,10 @@ class NcOrderedDict(OrderedDict):
             nonrecvars = [v for v in items if not v[1].isrec]
             def variableDiskSize(v):
                 if not v or v.data is None or len(v.shape) == 0:
+                    print("VARIABLE {} no size found".format(v))
                     return 0
                 else:
+                    print("Size of V is {}*{} = {}".format(v.itemsize, np.prod(v.shape), v.itemsize * np.prod(v.shape)))
                     return v.itemsize * np.prod(v.shape)
             nonrecvars.sort(key=lambda v: variableDiskSize(v[1]))
 
@@ -1199,15 +1280,20 @@ def nc_generator(ncfile, input):
     ncfile._calc_begins()
     yield ncfile._header()
     count += len(ncfile._header())
+    
+#    print("header = {}".format(ncfile._header()))
+#    print("count = {}".format(count))
 
     try:
         if ncfile.variables and ncfile.non_recvars:
             for name, var in ncfile.non_recvars.items():
+                print("now writing {}".format(name))
                 end = var._begin + var._vsize if var.dimensions else var._begin
                 assert count == var._begin
                 logger.debug("Writing non_recvar %s, bytes %d-%d", name, count, end)
 
-                length = var.data.size * var.itemsize
+                #length = var.data.size * var.itemsize
+                length = np.prod(var.shape) * var.itemsize
 
                 while count < var._begin + length:
                     data = input.next()
@@ -1216,11 +1302,14 @@ def nc_generator(ncfile, input):
                     logger.debug("Received %s, type %s, length %d bytes", data.byteswap(), data.dtype, len(bytes))
 
                     count += len(bytes)
-                    logger.debug("count %d", count)
+                    logger.debug("count %d of %d", count, var._begin + length)
+                    print("bytes length is {}".format(len(bytes)))
                     yield bytes
+                    print("after yield")
 
                 # padding
                 if (end - count < var._vsize):
+                    print("starting padding!")
                     logger.debug("Let's do some padding %d in variable %s", end-count, name)
                     bytes = asbytes('0') * (end - count)
                     count = end
