@@ -3,6 +3,7 @@
 
 import tempfile
 from pupynere import netcdf_variable, netcdf_file, nc_generator
+from itertools import combinations
 import os
 import numpy as np
 
@@ -27,13 +28,11 @@ def multiformat_netcdf_testing(dimensions, variables, attributes, test_assertion
         nc.createDimension(d, dimension_lengths[d])
     for v in variables:
         var = variables[v]
-        nc.createVariable(v, var.dtype, var.dimensions)
+        nc.createVariable(v, var.dtype, var.dimensions, attributes) #TODO: fix attributes
         nc.variables[v].data = var.data
     
     test_assertions(nc)
     nc.close()
-    
-    print(filename)
 
     
     # reopen the file and test it again
@@ -53,7 +52,7 @@ def multiformat_netcdf_testing(dimensions, variables, attributes, test_assertion
             nc3.createDimension(d, dimension_lengths[d])
         for v in variables:
             var = variables[v]
-            nc3.createVariable(v, var.dtype, var.dimensions)
+            nc3.createVariable(v, var.dtype, var.dimensions, attributes)
             nc3.variables[v].data = var.data
     
         test_assertions(nc3)
@@ -104,9 +103,42 @@ dimension_lengths = {"one": 1,
                      "twelve": 12, 
                      "thousand": 1000,
                      "unlimited": 0}
+# given dimension names from the list above, return a numpy shape describing
+# the variable
+def shape_from_dimensions(dimensions):
+    return tuple(map(lambda d: dimension_lengths[d], dimensions))
 
-# This is equivalent to numpy.arrange, which isn't present in the older version of numoy
-# used in this respository.
+# given dimension names from the list above, return a numpy array suitable 
+# to hold data for that variable (initialized to all ones)
+def data_from_dimensions(dimensions):
+    return np.ones(shape_from_dimensions(dimensions))
+
+# given dimension names form the list above, return a size for the corresonding variables
+# note: the size of a record variable is 0 (at least at creation)
+def size_from_dimensions(dimensions):
+    return data_from_dimensions(dimensions).size
+    
+
+# given a list of dimensions names from the list above, return a netcdf_variable
+# object with the specified dimensions and all 1s for data
+def default_variable_from_dimensions(dimensions):
+    return netcdf_variable(data_from_dimensions(dimensions), 'f8', shape_from_dimensions(dimensions), dimensions)
+
+# given a list of dimensions, return a dictionary with every variable that can be made by
+# combining the dimensions.
+def combinatoric_variables(dimensions, num_attrs=0):
+    variables = {}
+    vn = variable_namer()
+           
+    # create a variable for each combination of dimensions
+    for r in range(len(dimensions)):
+        for dim_set in list(combinations(dimensions, r+1)):
+            varname = vn.next()
+            variables[varname] = default_variable_from_dimensions(dim_set)
+    return variables
+
+# This is equivalent to numpy.arrange, which isn't present in the older version of numpy
+# used in this respository
 def arrange(n):
     arr = np.empty(n)
     for i in range(n):
