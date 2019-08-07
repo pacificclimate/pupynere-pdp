@@ -346,19 +346,27 @@ class netcdf_file(object):
 
         shape = tuple([self.dimensions[dim] for dim in dimensions])
         shape_ = tuple([dim or 0 for dim in shape])  # replace None with 0 for numpy
+        isrec = None in shape
 
         if None in shape and shape.index(None) != 0:
             raise ValueError("Unlimited dimension must be the first dimensionn to variable %s. Instead got dimension number %d" % (name, shape.index(None)))
 
         if isinstance(type, basestring):
             type = dtype(type)
+            
+        # Do not allocate an unpopulated numpy array for data on variable initialization. 
+        # Allocate space for data *only* when needed,
+        # Justification: the standard PCIC usage of this package is solely to generate
+        #    headers for a streamable netCDF file. Variable data is never used and,
+        #    if initialized, will take up large volumes of unnecesary memory.
 
-        data = empty(shape_, type)
+        #data = empty(shape_, type)
+        data = empty(shape_, type) if isrec else None
 
         self.variables[name] = netcdf_variable(
                 data, type, shape, dimensions,
                 maskandscale=self.maskandscale,
-                attributes=attributes)
+                attributes=attributes, isrec=isrec)
         return self.variables[name]
 
     def flush(self):
@@ -402,6 +410,8 @@ class netcdf_file(object):
     def _data(self):
         if self.variables:
             for var in self.variables.values():
+                if not var.data:
+                    raise ValueError("Cannot write variable with unallocated data")
                 if (var.data.dtype.byteorder == '<' or
                     (var.data.dtype.byteorder == '=' and LITTLE_ENDIAN)):
                     var.data = var.data.byteswap()
@@ -526,7 +536,7 @@ class netcdf_file(object):
 
         # vsize
         if not var.isrec:
-            vsize = var.data.size * var.itemsize
+            vsize = var.size * var.itemsize
             vsize += -vsize % 4
         else:  # record variable: vsize is the amount of space per record
                # The record size is calculated as the sum of the vsize's of the
@@ -682,7 +692,8 @@ class netcdf_file(object):
             # 32-bit vsize field is not large enough to contain the size
             # of variables that require more than 2^32 - 4 bytes, so
             # 2^32 - 1 is used in the vsize field for such variables.
-            if shape and shape[0] is None:  # record variable
+            isrec = shape and shape[0] is None
+            if isrec:  # record variable
                 rec_vars.append(name)
                 # The netCDF "record size" is calculated as the sum of
                 # the vsize's of all the record variables.
@@ -727,7 +738,7 @@ class netcdf_file(object):
             # Add variable.
             self.variables[name] = netcdf_variable(
                     data, type, shape, dimensions, attributes,
-                    maskandscale=self.maskandscale)
+                    maskandscale=self.maskandscale, isrec=isrec)
 
         if rec_vars:
             dtypes['formats'] = [f.replace('()', '').replace(' ', '') for f in dtypes['formats']]
@@ -882,12 +893,13 @@ class netcdf_variable(object):
     isrec, shape
 
     """
-    def __init__(self, data, type, shape, dimensions, attributes=None, maskandscale=False):
+    def __init__(self, data, type, shape, dimensions, attributes=None, maskandscale=False, isrec=False):
         self.data = data
         self.dtype = type
         self._shape = shape
         self.dimensions = dimensions
         self.maskandscale = maskandscale
+        self._isrec = isrec
 
         self._attributes = attributes or {}
         for k, v in self._attributes.items():
@@ -911,7 +923,8 @@ class netcdf_variable(object):
         `netcdf_variable`.
 
         """
-        return (hasattr(self.data, 'shape') and self.data.shape) and (not self._shape[0])
+        return self._isrec
+        # return (hasattr(self.data, 'shape') and self.data.shape) and (not self._shape[0])
     isrec = property(isrec)
 
     def shape(self):
@@ -920,7 +933,8 @@ class netcdf_variable(object):
         This is a read-only attribute and can not be modified in the
         same manner of other numpy arrays.
         """
-        return self.data.shape
+        return self.data.shape if self.data else self._shape
+        # return self.data.shape
     shape = property(shape)
 
     def getValue(self):
@@ -934,6 +948,8 @@ class netcdf_variable(object):
             this exception will be raised.
 
         """
+        if not self._data_allocated():
+            raise ValueError("Cannot access unallocated data")
         return self.data.item()
 
     def assignValue(self, value):
@@ -953,6 +969,8 @@ class netcdf_variable(object):
             netcdf variable.
 
         """
+        if not self._data_allocated():
+            self._allocate_data()
         if not self.data.flags.writeable:
             # Work-around for a bug in NumPy.  Calling itemset() on a read-only
             # memory-mapped array causes a seg. fault.
@@ -989,6 +1007,9 @@ class netcdf_variable(object):
     itemsize = property(itemsize)
 
     def __getitem__(self, index):
+        
+        if not self.data:
+            raise ValueError("Cannot access uninitialized data.")
         # scalar
         if not self.shape:
             return self.data.item()
@@ -1013,6 +1034,9 @@ class netcdf_variable(object):
         return data
 
     def __setitem__(self, index, data):
+        if not self._data_allocated():
+            self._allocate_data()
+        
         if self.maskandscale:
             missing_value = (
                     self._attributes.get('missing_value') or
@@ -1037,6 +1061,17 @@ class netcdf_variable(object):
                 shape = (recs,) + self._shape[1:]
                 self.data.resize(shape)
         self.data[index] = data
+    
+    def _data_allocated(self):
+        return self.data is not None
+    
+    def _allocate_data(self):
+        # Called when attempting to write to self.data if self.data is not yet initialized
+        self.data = empty(self.shape, self.dtype)
+    
+    def size(self):
+        return self.data.size if self.data else np.prod(self.shape)
+    size = property(size)
 
 from collections import OrderedDict
 class NcOrderedDict(OrderedDict):
@@ -1207,7 +1242,7 @@ def nc_generator(ncfile, input):
                 assert count == var._begin
                 logger.debug("Writing non_recvar %s, bytes %d-%d", name, count, end)
 
-                length = var.data.size * var.itemsize
+                length = var.size * var.itemsize
 
                 while count < var._begin + length:
                     data = input.next()
