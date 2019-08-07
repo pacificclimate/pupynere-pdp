@@ -410,7 +410,7 @@ class netcdf_file(object):
     def _data(self):
         if self.variables:
             for var in self.variables.values():
-                if not var.data:
+                if var.data is None:
                     raise ValueError("Cannot write variable with unallocated data")
                 if (var.data.dtype.byteorder == '<' or
                     (var.data.dtype.byteorder == '=' and LITTLE_ENDIAN)):
@@ -933,7 +933,7 @@ class netcdf_variable(object):
         This is a read-only attribute and can not be modified in the
         same manner of other numpy arrays.
         """
-        return self.data.shape if self.data else self._shape
+        return self._shape if self.data is None else self.data.shape
         # return self.data.shape
     shape = property(shape)
 
@@ -1008,7 +1008,7 @@ class netcdf_variable(object):
 
     def __getitem__(self, index):
         
-        if not self.data:
+        if self.data is None:
             raise ValueError("Cannot access uninitialized data.")
         # scalar
         if not self.shape:
@@ -1070,7 +1070,7 @@ class netcdf_variable(object):
         self.data = empty(self.shape, self.dtype)
     
     def size(self):
-        return self.data.size if self.data else np.prod(self.shape)
+        return np.prod(self.shape) if self.data is None else self.data.size
     size = property(size)
 
 from collections import OrderedDict
