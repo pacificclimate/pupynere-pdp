@@ -359,8 +359,6 @@ class netcdf_file(object):
         # Justification: the standard PCIC usage of this package is solely to generate
         #    headers for a streamable netCDF file. Variable data is never used and,
         #    if initialized, will take up large volumes of unnecesary memory.
-
-        #data = empty(shape_, type)
         data = empty(shape_, type) if isrec else None
 
         self.variables[name] = netcdf_variable(
@@ -924,7 +922,6 @@ class netcdf_variable(object):
 
         """
         return self._isrec
-        # return (hasattr(self.data, 'shape') and self.data.shape) and (not self._shape[0])
     isrec = property(isrec)
 
     def shape(self):
@@ -934,7 +931,6 @@ class netcdf_variable(object):
         same manner of other numpy arrays.
         """
         return self._shape if self.data is None else self.data.shape
-        # return self.data.shape
     shape = property(shape)
 
     def getValue(self):
