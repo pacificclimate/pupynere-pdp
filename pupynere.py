@@ -877,6 +877,8 @@ class netcdf_variable(object):
         become attributes for the netcdf_variable object.
     maskandscale: True or False
         Whether data is automagically scaled and masked.
+    isrec: True or False
+        Whether this is a record variable (first dimension unlimited)
 
 
     Attributes
@@ -930,7 +932,7 @@ class netcdf_variable(object):
         This is a read-only attribute and can not be modified in the
         same manner of other numpy arrays.
         """
-        return self._shape if self.data is None else self.data.shape
+        return self._shape if not self._data_allocated() else self.data.shape
     shape = property(shape)
 
     def getValue(self):
@@ -1004,7 +1006,7 @@ class netcdf_variable(object):
 
     def __getitem__(self, index):
         
-        if self.data is None:
+        if not self._data_allocated():
             raise ValueError("Cannot access uninitialized data.")
         # scalar
         if not self.shape:
@@ -1066,7 +1068,7 @@ class netcdf_variable(object):
         self.data = empty(self.shape, self.dtype)
     
     def size(self):
-        return np.prod(self.shape) if self.data is None else self.data.size
+        return np.prod(self.shape) if not self._data_allocated() else self.data.size
     size = property(size)
 
 from collections import OrderedDict
