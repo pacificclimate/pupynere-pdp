@@ -1,6 +1,12 @@
 News / Release Notes
 ====================
 
+1.1.6
+------
+*Release Date: 23-Aug-2019*
+
+* Just in time memory allocation for nonrecord variables
+
 1.1.5
 -----
 *Release Date: 15-Apr-2019*
