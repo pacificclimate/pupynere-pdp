@@ -1,0 +1,199 @@
+# Pupynere-pdp: netCDF streaming for the PCIC Data Portal
+
+This module is a fork of `pupynere`, a lightweight netCDF reading and writing 
+module. It has been modified for use in the [PCIC Data Portal](https://github.com/pacificclimate/pdp).
+In the context of the PDP, it is used to write and stream the headers and
+metadata of netCDF files as users download them.
+The PDP ecosystem uses [a different package](https://github.com/pacificclimate/pydap.handlers.hdf5)
+to read the data from the master file for streaming. PCIC's modifications for
+streaming netCDF files include:
+* calculate the filesize before the file is created so it can be sent as a content-length header
+* generator pattern so data can be sent in small chunks as it is ready
+* allow creation of virtual files in memory, not the filesystem
+* `NcOrderedDict` class for synchronizing variable order across multiple generators
+* Memory for variable data is not allocated until needed
+
+This package hews closely to the 
+[NetCDF file format specification](http://www.unidata.ucar.edu/software/netcdf/guide_15.html), 
+which should be considered supplementary documentation. Most functions and attributes on 
+the `netcdf_file` and `netcdf_variable` classes are named for the part of the NetCDF
+file spec they read or write.
+
+
+## Package Overview
+
+### `netcdf_file`
+  This class represents a netCDF file.
+  
+  It may be initialized with a filename, a file pointer, or neither. If initialized
+  with some kind of file representation, it will read and write data to the filesystem,
+  otherwise it will be virtual file resident in virtual memory. The PDP uses the virtual
+  option.
+  
+  Arbitrary attributes may be set on a netcdf_file object and will be treated as global
+  netCDF attributes when the file is streamed or written to disk.
+  - `filesize()` - projected or actual size of the file. Can be calculated before the file
+  is fully populated to send to a downloader as the content-length header, based on the 
+  variable, dimension, and record specifications. No actual data needed.
+  - `close()` - close the file pointer, if there is one.
+  - `__setattr__` - handles setting arbitrary attributes with dot notation
+  - `createDimension()` and `createVariable()` - add dimensions or variables to the file
+  - `flush()` - flush to disk. Only relevant for files on the filesystem
+  - `recvars()` and `nonrecvars()` - get an ordered dictionary of the record or nonrecord 
+    variables in this file
+  - `__generate__()` - get this file as generator chunks
+  - `_write()` - write the netCDF file to disk. Only relevant for files on the filesystem
+  - `_header()`, `_data()`, `_dim_array()`, `_gatt_array()`, `_var_array()`, `_att_array()`, `_num_recs()`, `_var_metadata()`
+    get the various parts of a netCDF file, encoded per the netCDF specification. Helper
+    functions to `_write()` and `__generate__()`. Reading the netCDF spec is helpful for
+    understanding the use of each of these functions; their names match up.
+  - `_read()` - read a netCDF file from the filesystem
+  - `_read_values()`, `_read_dim_array()`, `read_gatt_array()`, `read_var_array()`, `_read_att_array()`, `_read_num_recs()`, `_read_var_values()`
+    read part of a netCDF file from the filesystem, following the netCDF spec. Helper functions
+    to `_read()`. Reading the netCDF spec is helpful for understanding the use of each of 
+    these functions; their names match up. Not used by the PDP. 
+  - `_calc_begins()` - calculates the starting address of each variable. Essential for
+    streaming data if you want to send the header before you have all the variable data.
+  - `set_numrecs()` - set the number of records in the datafile without actually assigning the
+    data. Used for streaming data to send the filesize and complete headers before all
+    data is available.
+  - `_pack_begin()`, `_pack_int()`, `_pack_int_64()`, `_pack_string()`
+    return an integer or string in the correct format for a netCDF file. Helpers to
+    the file-writing or file-generator functions. NetCDF is big-endian
+  - `_unpack_int()`, `_unpack_int64()`, `unpack_string()`
+    read the file and translate an integer or string. Helpers to the `_read_*` functions
+
+*PDP Usage*: To create headers for streaming, the PDP (via `pydap.responses.netcdf`) uses
+this class to create a new, virtual netCDF file with the dimensions and variables requested
+by the user, along with global and variable metadata attributes read from the source
+netCDF file. 
+
+Then, based on the user request, the number of records is set and the variable begin
+addresses are calculated.
+
+At that point, `netcdf_file` has all the information needed to generate the complete
+netCDF file header, which is streamed to the downloader.  
+
+Next, a pydap handler package streams the data from the source file; data is never
+added to the virtual netcdf file created by this class. A `NcOrderedDict` is used
+to synchronize the order of the variables in the header generated here and the data
+generated by `pydap.handlers.hd5`.
+
+### `netcdf_variable`
+  This class represents a single netCDF variable within a file. 
+  
+  Arbitrary attributes
+  may be set on a `netcdf_variable` object, and will be treated as variable attributes
+  when the variable is streamed or written to disk.
+  
+  Data may be written to a `netcdf_variable` using square bracket notation as if it was
+  a numpy array.
+  
+  A variable is either a record variable or a nonrecord variable; they two types are
+  formatted differently when written to disk or streamed. Nonrecord variables have all
+  dimensions of known size and are written to disk or stream in a continuous block. Record
+  variables have one unlimited dimension (the record dimension) that is expected to expand
+  change over time. All record variables are written at the end of the file, interleaved
+  so that if more records are added, the file can be simply appended to without needing
+  to rewrite earlier portions.  Many things are handled differently depending on whether
+  a variable is a record or nonrecord variable. See the "More information on NetCDF"
+  section or the netCDF specification for more information.
+  - `isrec()` returns true if this is a record variable
+  - `shape()` the current numerical dimensions of the variable
+  - `getValue()` and `assignValue()` a netCDF variable may have no associated dimensions
+    and represent a scalar value. These functions access and set such a variable.
+  - `__getitem__()` and `__setitem__()` - numpy-style assignment and data access
+  - `__setattr__` - handles setting attributes with dot notation
+  - `typecode()` the type of the variable's data
+  - `itemsize()` the number of bytes a single datum occupies, ie 4 for an integer
+  - `size()` the total number of values in this variable (or potential values - can be
+    calculated without setting any data just from the dimensions and number of records, 
+    which is done when streaming)
+  - `_data_allocated()` and `_set_data()` Because the primary use of this package is just
+    to generate file headers, memory to hold variable data is not automatically allocated.
+    These functions check whether memory has been allocated and allocate it.
+    Memory is not allocated until the first time data is written to the variable.
+### `NcOrderedDict`
+  An ordered dictionary of the variables inside a netCDF file. Used by pydap to
+  coordinate the order pupynere lists variables in the header and the order blocks
+  of data are streamed by `pydap.handlers.hd5`. Can be either nonrecord, record,
+  or all variables. In the case of all variables, nonrecord variables ordered by
+  ascending size, then record variables.
+### `coroutine()`
+  Not currently used
+### `byteorderer()` 
+  Not currently used
+### `check_byteorder()`
+  Not currently used
+### `nc_streamer()`
+  Not currently used
+### `nc_generator()`
+  Generator that yields the headers of a netCDF file, then yields from additional 
+  generator(s) representing the data
+### `nc_writer()`
+  Not currently used
+### `TYPEMAP()` and `REVERSE()`
+  Map from netCDF types to numpy types and vice versa, respectively.  
+  
+## Running Tests
+
+Tests can be run with pytest.
+
+```bash
+   virtualenv venv
+   source venv/bin/activate
+   pip install .
+   pip install pytest
+   pytest
+```
+## Creating non-virtual netCDF files 
+
+Differently from the streaming workflow described above, this package can be used to create
+netCDF files on the filesystem, which may be useful for testing.
+
+To create a NetCDF file
+```python
+    >>> f = netcdf_file('simple.nc', 'w')
+    >>> f.history = 'Created for a test'
+    >>> f.createDimension('time', 10)
+    >>> time = f.createVariable('time', 'i', ('time',))
+    >>> time[:] = range(10)
+    >>> time.units = 'days since 2008-01-01'
+    >>> f.close()
+```
+
+To read the NetCDF file we just created
+```python
+    >>> f = netcdf_file('simple.nc', 'r')
+    >>> print f.history
+    Created for a test
+    >>> time = f.variables['time']
+    >>> print time.units
+    days since 2008-01-01
+    >>> print time.shape
+    (10,)
+    >>> print time[-1]
+    9
+    >>> f.close()
+```
+
+## More information on NetCDF 
+
+This module implements the Scientific.IO.NetCDF API to read and create NetCDF files. The same API is also used in the PyNIO and pynetcdf modules, allowing these modules to be used interchangebly when working with NetCDF files. The major advantage of `scipy.io.netcdf` over other modules is that it doesn't require the code to be linked to the NetCDF libraries as the other modules do.
+
+The code is based on the [NetCDF file format specification](http://www.unidata.ucar.edu/software/netcdf/guide_15.html). A NetCDF file is a self-describing binary format, with a header followed by data. The header contains metadata describing dimensions, variables and the position of the data in the file, so access can be done in an efficient manner without loading unnecessary data into memory. We use the `mmap` module to create Numpy arrays mapped to the data on disk, for the same purpose.
+
+The structure of a NetCDF file is as follows
+```
+    C D F <VERSION BYTE> <NUMBER OF RECORDS>
+    <DIMENSIONS> <GLOBAL ATTRIBUTES> <VARIABLES METADATA>
+    <NON-RECORD DATA> <RECORD DATA>
+```
+Record data refers to data where the first axis can be expanded at will. All record variables share a same dimension at the first axis, and they are stored at the end of the file per record, ie
+
+```
+    A[0], B[0], ..., A[1], B[1], ..., etc,
+```    
+so that new data can be appended to the file without changing its original structure. Non-record data are padded to a 4n bytes boundary. Record data are also padded, unless there is exactly one record variable in the file, in which case the padding is dropped.  All data is stored in big endian byte order.
+
+The Scientific.IO.NetCDF API allows attributes to be added directly to instances of `netcdf_file` and `netcdf_variable`. To differentiate between user-set attributes and instance attributes, user-set attributes are automatically stored in the `_attributes` attribute by overloading `__setattr__`. This is the reason why the code sometimes uses `obj.__dict__['key'] = value`, instead of simply `obj.key = value`; otherwise the key would be inserted into userspace attributes.

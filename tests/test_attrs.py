@@ -43,6 +43,10 @@ class AttributesTestCase(unittest.TestCase):
         v.intatt = INTATT
         v.floatatt = FLOATATT
         v.seqatt = SEQATT
+        
+        data = NP.empty(shape=(DIM1_LEN,DIM2_LEN,DIM3_LEN))
+        v[:] = data
+
 
         f.close()
 
