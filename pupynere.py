@@ -347,10 +347,8 @@ class netcdf_file(object):
                 raise ValueError('Cannot create variable with dimension "{0}". The netcdf file\'s dimensions are {1}.'.format(dim, self.dimensions))
 
         shape = tuple([self.dimensions[dim] for dim in dimensions])
-        print(shape)
         shape_ = tuple([dim or 0 for dim in shape])  # replace None with 0 for numpy
         isrec = None in shape
-        print(isrec)
 
         if None in shape and shape.index(None) != 0:
             raise ValueError("Unlimited dimension must be the first dimensionn to variable %s. Instead got dimension number %d" % (name, shape.index(None)))

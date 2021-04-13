@@ -43,7 +43,7 @@ class AttributesTestCase(unittest.TestCase):
         v.intatt = INTATT
         v.floatatt = FLOATATT
         v.seqatt = SEQATT
-        
+
         data = NP.empty(shape=(DIM1_LEN,DIM2_LEN,DIM3_LEN))
         v[:] = data
 
@@ -65,6 +65,7 @@ class AttributesTestCase(unittest.TestCase):
         self.assertEquals(f.stratt, STRATT)
         self.assertEquals(f.emptystratt, EMPTYSTRATT)
         self.assertEquals(f.seqatt.tolist(), SEQATT.tolist())
+        self.assertEqual(f.filesize, 2880)
 
         # variable attributes
         self.assertEquals(v.intatt, INTATT)
