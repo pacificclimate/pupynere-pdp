@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 import unittest
 import tempfile
-import os
 import math
 import numpy as np
 from numpy import dtype
 
-from pupynere import netcdf_file, byteorderer, nc_streamer, nc_generator, nc_writer
+from pupynere import netcdf_file, nc_generator
 
 VAR_NAME='temp'
 VAR_TYPE='>f4'
