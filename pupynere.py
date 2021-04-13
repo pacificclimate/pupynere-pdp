@@ -145,6 +145,8 @@ def REVERSE(nptype):
                dtype(np.int32):   NC_INT,
                dtype(np.int64):   NC_INT,  # will be converted to int32
                dtype(np.float32): NC_FLOAT,
+               dtype('>f4'):      NC_FLOAT,
+               dtype('>f8'):      NC_DOUBLE,
                dtype(np.float64): NC_DOUBLE,
             }
     if nptype in static:
@@ -345,8 +347,10 @@ class netcdf_file(object):
                 raise ValueError('Cannot create variable with dimension "{0}". The netcdf file\'s dimensions are {1}.'.format(dim, self.dimensions))
 
         shape = tuple([self.dimensions[dim] for dim in dimensions])
+        print(shape)
         shape_ = tuple([dim or 0 for dim in shape])  # replace None with 0 for numpy
         isrec = None in shape
+        print(isrec)
 
         if None in shape and shape.index(None) != 0:
             raise ValueError("Unlimited dimension must be the first dimensionn to variable %s. Instead got dimension number %d" % (name, shape.index(None)))
@@ -1135,14 +1139,14 @@ Examples
     except StopIteration:
         pass
 
-def check_byteorder(input):
+def check_byteorder(input_):
     ''' an iteration-based approach to byteorderer above
         input should be an iterable of numpy arrays with which to
         fill the netcdf file
     '''
     try:
         while True:
-            data = input.next()
+            data = input_.next()
             if (data.dtype.byteorder == '<' or
                 (data.dtype.byteorder == '=' and LITTLE_ENDIAN)):
                 data = data.byteswap()
