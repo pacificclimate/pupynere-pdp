@@ -145,8 +145,6 @@ def REVERSE(nptype):
                dtype(np.int32):   NC_INT,
                dtype(np.int64):   NC_INT,  # will be converted to int32
                dtype(np.float32): NC_FLOAT,
-               dtype('>f4'):      NC_FLOAT,
-               dtype('>f8'):      NC_DOUBLE,
                dtype(np.float64): NC_DOUBLE,
             }
     if nptype in static:

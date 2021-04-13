@@ -7,9 +7,9 @@ from numpy import dtype
 
 from pupynere import netcdf_file, nc_generator
 
-VAR_NAME='temp'
-VAR_TYPE='>f4'
-VAR_VAL=math.pi
+VAR_NAME = 'temp'
+VAR_TYPE = 'f4'
+VAR_VAL = math.pi
 
 n1dim = 4
 n2dim = 10
@@ -20,7 +20,7 @@ class TestGeneratorNonrecvars(unittest.TestCase):
 
     def runTest(self):
         f = netcdf_file(None, 'w')
-        temp = f.createVariable(VAR_NAME,VAR_TYPE)
+        temp = f.createVariable(VAR_NAME, dtype(VAR_TYPE))
         temp.assignValue(VAR_VAL)
 
         # Test filesize property of a virtual file with nonrecvars
@@ -32,10 +32,11 @@ class TestGeneratorNonrecvars(unittest.TestCase):
             for block in pipeline:
                 fn.write(block)
 
+            fn.flush()
             nc = netcdf_file(fn.name, 'r')
             assert nc.variables.has_key(VAR_NAME)
             assert nc.variables[VAR_NAME].data == np.float32(VAR_VAL)
-            assert nc.variables[VAR_NAME].dtype == dtype(VAR_TYPE)
+            assert nc.variables[VAR_NAME].dtype == dtype('>f4')
 
             nc.close()
 
@@ -51,7 +52,7 @@ class TestGeneratorRecvars(unittest.TestCase):
         f = netcdf_file(None, 'w')
         for i in range(len(keys)):
             f.createDimension(keys[i], dims[i])
-        foo = f.createVariable('data1', ranarr.dtype.str[1:], keys)
+        foo = f.createVariable('data1', ranarr.dtype, keys)
 
         # write some data to it.
         foo[:] = ranarr
@@ -67,6 +68,7 @@ class TestGeneratorRecvars(unittest.TestCase):
             for block in pipeline:
                 fn.write(block)
 
+            fn.flush()
             nc = netcdf_file(fn.name, 'r')
             assert nc.variables.has_key('data1')
             for i, n in enumerate(keys):
