@@ -1105,7 +1105,7 @@ def coroutine(func):
     '''
     def generator(*args, **kwargs):
         primed_func = func(*args, **kwargs)
-        primed_func.next()
+        next(primed_func)
         return primed_func
     return generator
 
@@ -1142,7 +1142,7 @@ def check_byteorder(input_):
     '''
     try:
         while True:
-            data = input_.next()
+            data = next(input_)
             if (data.dtype.byteorder == '<' or
                 (data.dtype.byteorder == '=' and LITTLE_ENDIAN)):
                 data = data.byteswap()
@@ -1243,7 +1243,7 @@ def nc_generator(ncfile, input):
                 length = var.size * var.itemsize
 
                 while count < var._begin + length:
-                    data = input.next()
+                    data = next(input)
 
                     bytes = data.tostring()
                     logger.debug("Received %s, type %s, length %d bytes", data.byteswap(), data.dtype, len(bytes))
@@ -1266,7 +1266,7 @@ def nc_generator(ncfile, input):
                 vars = ncfile.recvars.values()
                 while True:
                     for var in vars:
-                        data = input.next()
+                        data = next(input)
 
                         bytes = data.tostring()
                         yield bytes
