@@ -22,7 +22,7 @@ class TestNonFirstUnlim(unittest.TestCase):
         f.createDimension('n1', n1dim)
         with self.assertRaises(ValueError):
             f.createDimension('n2', None)
-        self.assertEquals(f.dimensions, {'n1': n1dim})
+        self.assertEqual(f.dimensions, {'n1': n1dim})
 
 class TestMultipleUnlim(unittest.TestCase):
     def runTest(self):
@@ -58,7 +58,7 @@ class FirstUnlimdimTestCase(unittest.TestCase):
         f  = pupynere.netcdf_file(self.file, 'r')
         foo = f.variables['data1']
         # check shape.
-        self.assertEquals(foo.shape, (2*n1dim,n2dim,n3dim))
+        self.assertEqual(foo.shape, (2*n1dim,n2dim,n3dim))
         # check data.
         self.assertTrue((foo[0:n1dim,:,:] == ranarr).all())
         self.assertTrue((foo[n1dim:3*n1dim,:,:] == 2.*ranarr).all())

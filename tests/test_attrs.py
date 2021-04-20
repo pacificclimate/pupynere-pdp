@@ -60,19 +60,19 @@ class AttributesTestCase(unittest.TestCase):
         v = f.variables[VAR_NAME]
 
         # global attributes.
-        self.assertEquals(f.intatt, INTATT)
+        self.assertEqual(f.intatt, INTATT)
         assert_almost_equal(f.floatatt, FLOATATT, 6)
-        self.assertEquals(f.stratt, STRATT)
-        self.assertEquals(f.emptystratt, EMPTYSTRATT)
-        self.assertEquals(f.seqatt.tolist(), SEQATT.tolist())
+        self.assertEqual(f.stratt, STRATT)
+        self.assertEqual(f.emptystratt, EMPTYSTRATT)
+        self.assertEqual(f.seqatt.tolist(), SEQATT.tolist())
         self.assertEqual(f.filesize, 2880)
 
         # variable attributes
-        self.assertEquals(v.intatt, INTATT)
-        self.assertEquals(v.stratt, STRATT)
-        self.assertEquals(v.seqatt.tolist(), SEQATT.tolist())
+        self.assertEqual(v.intatt, INTATT)
+        self.assertEqual(v.stratt, STRATT)
+        self.assertEqual(v.seqatt.tolist(), SEQATT.tolist())
         assert_almost_equal(v.floatatt, FLOATATT, 6)
-        self.assertEquals(v.emptystratt, EMPTYSTRATT)
+        self.assertEqual(v.emptystratt, EMPTYSTRATT)
 
         f.close()
 

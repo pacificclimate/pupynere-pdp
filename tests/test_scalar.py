@@ -38,8 +38,8 @@ class ScalarVariableTestCase(unittest.TestCase):
         f  = pupynere.netcdf_file(self.file, 'r')
         v = f.variables[VAR_NAME]
         # dimensions and shape should be empty tuples
-        self.assert_(v.dimensions == ())
-        self.assert_(v.shape == ())
+        assert v.dimensions == ()
+        assert v.shape == ()
         # check result of getValue and slice
         assert_almost_equal(v.getValue(), VAR_VAL, decimal=6)
         assert_almost_equal(v[:], VAR_VAL, decimal=6)
