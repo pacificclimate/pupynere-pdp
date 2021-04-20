@@ -100,7 +100,7 @@ except ImportError:
 
 import numpy as np
 from numpy.compat import asbytes, asstr
-from numpy import fromstring, ndarray, dtype, empty, array, asarray
+from numpy import frombuffer, ndarray, dtype, empty, array, asarray
 from numpy import little_endian as LITTLE_ENDIAN
 
 logger = logging.getLogger('__name__')
@@ -376,7 +376,7 @@ class netcdf_file(object):
         sync : Identical function
 
         """
-        if hasattr(self, 'mode') and self.mode is 'w':
+        if hasattr(self, 'mode') and self.mode == 'w':
             self._write()
     sync = flush
 
@@ -615,7 +615,7 @@ class netcdf_file(object):
         if not magic == asbytes('CDF'):
             raise TypeError("Error: %s is not a valid NetCDF 3 file" %
                             self.filename)
-        self.__dict__['version_byte'] = fromstring(self.fp.read(1), '>b')[0]
+        self.__dict__['version_byte'] = frombuffer(self.fp.read(1), '>b')[0]
 
         # Read file headers and set data.
         self._read_numrecs()
@@ -725,10 +725,10 @@ class netcdf_file(object):
                         mm = mmap(self.fp.fileno(), start+size, access=ACCESS_READ)
 
                     data = ndarray.__new__(ndarray, shape, dtype=type,
-                            buffer=mm, offset=start, order=0)
+                            buffer=mm, offset=start, order='C')
                 else:
                     self.fp.seek(start)
-                    data = fromstring(self.fp.read(size), type)
+                    data = frombuffer(self.fp.read(size), type)
                     data.shape = shape
                 self.fp.seek(pos)
 
@@ -756,10 +756,10 @@ class netcdf_file(object):
                     mm = mmap(self.fp.fileno(), records+self._recs*self._recsize, access=ACCESS_READ)
 
                 rec_array = ndarray.__new__(ndarray, (self._recs,), dtype=dtypes,
-                        buffer=mm, offset=records, order=0)
+                        buffer=mm, offset=records, order='C')
             else:
                 self.fp.seek(records)
-                rec_array = fromstring(self.fp.read(self._recs*self._recsize), dtype=dtypes)
+                rec_array = frombuffer(self.fp.read(self._recs*self._recsize), dtype=dtypes)
                 rec_array.shape = (self._recs,)
             self.fp.seek(pos)
 
@@ -783,7 +783,7 @@ class netcdf_file(object):
 
         attributes = self._read_att_array()
         nc_type = self.fp.read(4)
-        vsize = int(fromstring(self.fp.read(4), 'int32')[0])
+        vsize = int(frombuffer(self.fp.read(4), 'int32')[0])
 
         start = [self._unpack_int, self._unpack_int64][self.version_byte-1]()
         type = TYPEMAP(nc_type)
@@ -801,7 +801,7 @@ class netcdf_file(object):
         self.fp.read(-count % 4)  # read padding
 
         if type.char not in ('S', 'a'):
-            values = fromstring(values, type)
+            values = frombuffer(values, type)
             if values.shape == (1,): values = values[0]
         else:
             ## text values are encoded via UTF-8, per NetCDF standard
@@ -819,14 +819,14 @@ class netcdf_file(object):
     _pack_int32 = _pack_int
 
     def _unpack_int(self):
-        return int(fromstring(self.fp.read(4), '>i')[0])
+        return int(frombuffer(self.fp.read(4), '>i')[0])
     _unpack_int32 = _unpack_int
 
     def _pack_int64(self, value):
         return array(value, '>q').tostring()
 
     def _unpack_int64(self):
-        return fromstring(self.fp.read(8), '>q')[0]
+        return frombuffer(self.fp.read(8), '>q')[0]
 
     def _pack_string(self, s):
         count = len(s)
