@@ -89,7 +89,7 @@ To read the NetCDF file we just created:
 
 __all__ = ['netcdf_file']
 
-
+from functools import reduce
 from operator import mul
 from mmap import mmap, ACCESS_READ
 from os import stat
@@ -271,7 +271,7 @@ class netcdf_file(object):
                 self._calc_begins()
             return int(recvar0._begin + (self._recs * self._recsize))
         else:
-            lastvar = self.non_recvars.values()[-1]
+            lastvar = list(self.non_recvars.values())[-1]
             if not hasattr(lastvar, '_begin'):
                 self._calc_begins()
             return int(lastvar._begin + lastvar._vsize)
@@ -351,7 +351,7 @@ class netcdf_file(object):
         if None in shape and shape.index(None) != 0:
             raise ValueError("Unlimited dimension must be the first dimensionn to variable %s. Instead got dimension number %d" % (name, shape.index(None)))
 
-        if isinstance(type, basestring):
+        if isinstance(type, str):
             type = dtype(type)
             
         # Do not allocate an unpopulated numpy array for data on variable initialization. 
@@ -381,11 +381,11 @@ class netcdf_file(object):
     sync = flush
 
     def recvars(self):
-        return OrderedDict( filter(lambda (k, v): v.isrec, self.variables.items()) )
+        return OrderedDict( filter(lambda kv: kv[1].isrec, self.variables.items()) )
     recvars = property(recvars)
 
     def non_recvars(self):
-        return OrderedDict( filter(lambda (k, v): not v.isrec, self.variables.items()) )
+        return OrderedDict( filter(lambda kv: not kv[1].isrec, self.variables.items()) )
     non_recvars = property(non_recvars)
 
     def __generate__(self):
@@ -574,16 +574,15 @@ class netcdf_file(object):
             # FIXME: if REVERSE(values.dtype) raises an attribute error then so will this!
             types = [
                     (int, NC_INT),
-                    (long, NC_INT),
                     (float, NC_FLOAT),
-                    (basestring, NC_CHAR),
+                    (str, NC_CHAR),
                     ]
             try:
                 sample = values[0]
             except (IndexError, TypeError):
                 sample = values
-            if isinstance(sample, unicode):
-                if not isinstance(values, unicode):
+            if isinstance(sample, str):
+                if not isinstance(values, str):
                     raise ValueError("NetCDF requires that text be encoded as UTF-8")
                 values = values.encode('utf-8')
             for class_, nc_type in types:
@@ -1270,7 +1269,7 @@ def nc_generator(ncfile, input):
 
                         bytes = data.tostring()
                         yield bytes
-                        
+
                         # This is not per the NetCDF spec. The spec says to fill a
                         # variable's fill-value. But that doesn't make sense in
                         # this context where there are multiple variable and could

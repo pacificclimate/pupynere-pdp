@@ -34,7 +34,7 @@ class TestGeneratorNonrecvars(unittest.TestCase):
 
             fn.flush()
             nc = netcdf_file(fn.name, 'r')
-            assert nc.variables.has_key(VAR_NAME)
+            assert VAR_NAME in nc.variables.keys()
             assert nc.variables[VAR_NAME].data == np.float32(VAR_VAL)
             assert nc.variables[VAR_NAME].dtype == dtype('>f4')
 
@@ -70,9 +70,9 @@ class TestGeneratorRecvars(unittest.TestCase):
 
             fn.flush()
             nc = netcdf_file(fn.name, 'r')
-            assert nc.variables.has_key('data1')
+            assert 'data1' in nc.variables.keys()
             for i, n in enumerate(keys):
-                assert nc.dimensions.has_key(n)
+                assert n in nc.dimensions.keys()
                 assert nc.dimensions[n] == dims[i]
 
             nc.close()
