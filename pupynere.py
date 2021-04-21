@@ -89,7 +89,7 @@ To read the NetCDF file we just created:
 
 __all__ = ['netcdf_file']
 
-
+from functools import reduce
 from operator import mul
 from mmap import mmap, ACCESS_READ
 from os import stat
@@ -100,7 +100,7 @@ except ImportError:
 
 import numpy as np
 from numpy.compat import asbytes, asstr
-from numpy import fromstring, ndarray, dtype, empty, array, asarray
+from numpy import frombuffer, ndarray, dtype, empty, array, asarray
 from numpy import little_endian as LITTLE_ENDIAN
 
 logger = logging.getLogger('__name__')
@@ -271,7 +271,7 @@ class netcdf_file(object):
                 self._calc_begins()
             return int(recvar0._begin + (self._recs * self._recsize))
         else:
-            lastvar = self.non_recvars.values()[-1]
+            lastvar = list(self.non_recvars.values())[-1]
             if not hasattr(lastvar, '_begin'):
                 self._calc_begins()
             return int(lastvar._begin + lastvar._vsize)
@@ -351,7 +351,7 @@ class netcdf_file(object):
         if None in shape and shape.index(None) != 0:
             raise ValueError("Unlimited dimension must be the first dimensionn to variable %s. Instead got dimension number %d" % (name, shape.index(None)))
 
-        if isinstance(type, basestring):
+        if isinstance(type, str):
             type = dtype(type)
             
         # Do not allocate an unpopulated numpy array for data on variable initialization. 
@@ -376,16 +376,16 @@ class netcdf_file(object):
         sync : Identical function
 
         """
-        if hasattr(self, 'mode') and self.mode is 'w':
+        if hasattr(self, 'mode') and self.mode == 'w':
             self._write()
     sync = flush
 
     def recvars(self):
-        return OrderedDict( filter(lambda (k, v): v.isrec, self.variables.items()) )
+        return OrderedDict( filter(lambda kv: kv[1].isrec, self.variables.items()) )
     recvars = property(recvars)
 
     def non_recvars(self):
-        return OrderedDict( filter(lambda (k, v): not v.isrec, self.variables.items()) )
+        return OrderedDict( filter(lambda kv: not kv[1].isrec, self.variables.items()) )
     non_recvars = property(non_recvars)
 
     def __generate__(self):
@@ -396,7 +396,7 @@ class netcdf_file(object):
 
     def _header(self):
         return asbytes('CDF') + \
-               array(self.version_byte, '>b').tostring() + \
+               array(self.version_byte, '>b').tobytes() + \
                self._numrecs() + \
                self._dim_array() + \
                self._gatt_array() + \
@@ -413,9 +413,9 @@ class netcdf_file(object):
                 if (var.data.dtype.byteorder == '<' or
                     (var.data.dtype.byteorder == '=' and LITTLE_ENDIAN)):
                     var.data = var.data.byteswap()
-                    
+
             for var in self.non_recvars.values():
-                yield var.data.tostring()
+                yield var.data.tobytes()
                 count = var.data.size * var.itemsize
                 yield asbytes('0') * (var._vsize - count)
 
@@ -423,7 +423,7 @@ class netcdf_file(object):
             for i in range(self._recs):
                 for var in self.recvars.values():
                     stride = var.data[i,:] if len(var.data.shape) > 1 else var.data[i]
-                    yield stride.tostring()
+                    yield stride.tobytes()
 
     def _calc_begins(self):
         '''Each netcdf variable has a metadata item named 'begin' which is an offset to the location in
@@ -551,7 +551,7 @@ class netcdf_file(object):
         # a) redundant, since it can be determined from other header info
         # b) insufficient, since it's only 32 bits and files can be > 4GB
         # therefore, clip it... the spec made me do it!
-        buf += array(min(vsize, 2**32 - 4), 'int32').tostring()
+        buf += array(min(vsize, 2**32 - 4), 'int32').tobytes()
 
         # begin
         # Pack a bogus begin, if it hasn't been calculated yet
@@ -574,16 +574,15 @@ class netcdf_file(object):
             # FIXME: if REVERSE(values.dtype) raises an attribute error then so will this!
             types = [
                     (int, NC_INT),
-                    (long, NC_INT),
                     (float, NC_FLOAT),
-                    (basestring, NC_CHAR),
+                    (str, NC_CHAR),
                     ]
             try:
                 sample = values[0]
             except (IndexError, TypeError):
                 sample = values
-            if isinstance(sample, unicode):
-                if not isinstance(values, unicode):
+            if isinstance(sample, str):
+                if not isinstance(values, str):
                     raise ValueError("NetCDF requires that text be encoded as UTF-8")
                 values = values.encode('utf-8')
             for class_, nc_type in types:
@@ -605,7 +604,7 @@ class netcdf_file(object):
         if not values.shape and (values.dtype.byteorder == '<' or
                 (values.dtype.byteorder == '=' and LITTLE_ENDIAN)):
             values = values.byteswap()
-        buf += values.tostring()
+        buf += values.tobytes()
         count = values.size * values.itemsize
         buf += asbytes('0') * (-count % 4) # pad
         return buf
@@ -616,7 +615,7 @@ class netcdf_file(object):
         if not magic == asbytes('CDF'):
             raise TypeError("Error: %s is not a valid NetCDF 3 file" %
                             self.filename)
-        self.__dict__['version_byte'] = fromstring(self.fp.read(1), '>b')[0]
+        self.__dict__['version_byte'] = frombuffer(self.fp.read(1), '>b')[0]
 
         # Read file headers and set data.
         self._read_numrecs()
@@ -726,10 +725,10 @@ class netcdf_file(object):
                         mm = mmap(self.fp.fileno(), start+size, access=ACCESS_READ)
 
                     data = ndarray.__new__(ndarray, shape, dtype=type,
-                            buffer=mm, offset=start, order=0)
+                            buffer=mm, offset=start, order='C')
                 else:
                     self.fp.seek(start)
-                    data = fromstring(self.fp.read(size), type)
+                    data = frombuffer(self.fp.read(size), type)
                     data.shape = shape
                 self.fp.seek(pos)
 
@@ -757,10 +756,10 @@ class netcdf_file(object):
                     mm = mmap(self.fp.fileno(), records+self._recs*self._recsize, access=ACCESS_READ)
 
                 rec_array = ndarray.__new__(ndarray, (self._recs,), dtype=dtypes,
-                        buffer=mm, offset=records, order=0)
+                        buffer=mm, offset=records, order='C')
             else:
                 self.fp.seek(records)
-                rec_array = fromstring(self.fp.read(self._recs*self._recsize), dtype=dtypes)
+                rec_array = frombuffer(self.fp.read(self._recs*self._recsize), dtype=dtypes)
                 rec_array.shape = (self._recs,)
             self.fp.seek(pos)
 
@@ -784,7 +783,7 @@ class netcdf_file(object):
 
         attributes = self._read_att_array()
         nc_type = self.fp.read(4)
-        vsize = int(fromstring(self.fp.read(4), 'int32')[0])
+        vsize = int(frombuffer(self.fp.read(4), 'int32')[0])
 
         start = [self._unpack_int, self._unpack_int64][self.version_byte-1]()
         type = TYPEMAP(nc_type)
@@ -802,7 +801,7 @@ class netcdf_file(object):
         self.fp.read(-count % 4)  # read padding
 
         if type.char not in ('S', 'a'):
-            values = fromstring(values, type)
+            values = frombuffer(values, type)
             if values.shape == (1,): values = values[0]
         else:
             ## text values are encoded via UTF-8, per NetCDF standard
@@ -816,18 +815,18 @@ class netcdf_file(object):
             return self._pack_int64(begin)
 
     def _pack_int(self, value):
-        return array(value, '>i').tostring()
+        return array(value, '>i').tobytes()
     _pack_int32 = _pack_int
 
     def _unpack_int(self):
-        return int(fromstring(self.fp.read(4), '>i')[0])
+        return int(frombuffer(self.fp.read(4), '>i')[0])
     _unpack_int32 = _unpack_int
 
     def _pack_int64(self, value):
-        return array(value, '>q').tostring()
+        return array(value, '>q').tobytes()
 
     def _unpack_int64(self):
-        return fromstring(self.fp.read(8), '>q')[0]
+        return frombuffer(self.fp.read(8), '>q')[0]
 
     def _pack_string(self, s):
         count = len(s)
@@ -1179,7 +1178,7 @@ def nc_streamer(ncfile, target):
                 end = var._begin + var._vsize if var.dimensions else var._begin
                 while count < end:
                     data = (yield)
-                    bytes = data.tostring()
+                    bytes = data.tobytes()
 
                     count += len(bytes)
                     # padding
@@ -1195,7 +1194,7 @@ def nc_streamer(ncfile, target):
                 for i in range(ncfile._recs):
                     for var in vars:
                         data = (yield)
-                        bytes = data.tostring()
+                        bytes = data.tobytes()
                         target.send(bytes)
                         padding = len(bytes) % 4
                         if padding:
@@ -1245,7 +1244,7 @@ def nc_generator(ncfile, input):
                 while count < var._begin + length:
                     data = next(input)
 
-                    bytes = data.tostring()
+                    bytes = data.tobytes()
                     logger.debug("Received %s, type %s, length %d bytes", data.byteswap(), data.dtype, len(bytes))
 
                     count += len(bytes)
@@ -1268,9 +1267,9 @@ def nc_generator(ncfile, input):
                     for var in vars:
                         data = next(input)
 
-                        bytes = data.tostring()
+                        bytes = data.tobytes()
                         yield bytes
-                        
+
                         # This is not per the NetCDF spec. The spec says to fill a
                         # variable's fill-value. But that doesn't make sense in
                         # this context where there are multiple variable and could
