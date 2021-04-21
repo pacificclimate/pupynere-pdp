@@ -396,7 +396,7 @@ class netcdf_file(object):
 
     def _header(self):
         return asbytes('CDF') + \
-               array(self.version_byte, '>b').tostring() + \
+               array(self.version_byte, '>b').tobytes() + \
                self._numrecs() + \
                self._dim_array() + \
                self._gatt_array() + \
@@ -413,9 +413,9 @@ class netcdf_file(object):
                 if (var.data.dtype.byteorder == '<' or
                     (var.data.dtype.byteorder == '=' and LITTLE_ENDIAN)):
                     var.data = var.data.byteswap()
-                    
+
             for var in self.non_recvars.values():
-                yield var.data.tostring()
+                yield var.data.tobytes()
                 count = var.data.size * var.itemsize
                 yield asbytes('0') * (var._vsize - count)
 
@@ -423,7 +423,7 @@ class netcdf_file(object):
             for i in range(self._recs):
                 for var in self.recvars.values():
                     stride = var.data[i,:] if len(var.data.shape) > 1 else var.data[i]
-                    yield stride.tostring()
+                    yield stride.tobytes()
 
     def _calc_begins(self):
         '''Each netcdf variable has a metadata item named 'begin' which is an offset to the location in
@@ -551,7 +551,7 @@ class netcdf_file(object):
         # a) redundant, since it can be determined from other header info
         # b) insufficient, since it's only 32 bits and files can be > 4GB
         # therefore, clip it... the spec made me do it!
-        buf += array(min(vsize, 2**32 - 4), 'int32').tostring()
+        buf += array(min(vsize, 2**32 - 4), 'int32').tobytes()
 
         # begin
         # Pack a bogus begin, if it hasn't been calculated yet
@@ -604,7 +604,7 @@ class netcdf_file(object):
         if not values.shape and (values.dtype.byteorder == '<' or
                 (values.dtype.byteorder == '=' and LITTLE_ENDIAN)):
             values = values.byteswap()
-        buf += values.tostring()
+        buf += values.tobytes()
         count = values.size * values.itemsize
         buf += asbytes('0') * (-count % 4) # pad
         return buf
@@ -815,7 +815,7 @@ class netcdf_file(object):
             return self._pack_int64(begin)
 
     def _pack_int(self, value):
-        return array(value, '>i').tostring()
+        return array(value, '>i').tobytes()
     _pack_int32 = _pack_int
 
     def _unpack_int(self):
@@ -823,7 +823,7 @@ class netcdf_file(object):
     _unpack_int32 = _unpack_int
 
     def _pack_int64(self, value):
-        return array(value, '>q').tostring()
+        return array(value, '>q').tobytes()
 
     def _unpack_int64(self):
         return frombuffer(self.fp.read(8), '>q')[0]
@@ -1178,7 +1178,7 @@ def nc_streamer(ncfile, target):
                 end = var._begin + var._vsize if var.dimensions else var._begin
                 while count < end:
                     data = (yield)
-                    bytes = data.tostring()
+                    bytes = data.tobytes()
 
                     count += len(bytes)
                     # padding
@@ -1194,7 +1194,7 @@ def nc_streamer(ncfile, target):
                 for i in range(ncfile._recs):
                     for var in vars:
                         data = (yield)
-                        bytes = data.tostring()
+                        bytes = data.tobytes()
                         target.send(bytes)
                         padding = len(bytes) % 4
                         if padding:
@@ -1244,7 +1244,7 @@ def nc_generator(ncfile, input):
                 while count < var._begin + length:
                     data = next(input)
 
-                    bytes = data.tostring()
+                    bytes = data.tobytes()
                     logger.debug("Received %s, type %s, length %d bytes", data.byteswap(), data.dtype, len(bytes))
 
                     count += len(bytes)
@@ -1267,7 +1267,7 @@ def nc_generator(ncfile, input):
                     for var in vars:
                         data = next(input)
 
-                        bytes = data.tostring()
+                        bytes = data.tobytes()
                         yield bytes
 
                         # This is not per the NetCDF spec. The spec says to fill a
