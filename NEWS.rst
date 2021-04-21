@@ -1,6 +1,12 @@
 News / Release Notes
 ====================
 
+2.0.0
+------
+*Release Date: 21-April-2021*
+
+* Update to Python 3
+
 1.1.6
 ------
 *Release Date: 23-Aug-2019*
