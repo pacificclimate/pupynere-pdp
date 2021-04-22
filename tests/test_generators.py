@@ -58,7 +58,6 @@ class TestGeneratorRecvars(unittest.TestCase):
         foo[:] = ranarr
         foo[n1dim:,:,:] = 2.*ranarr
 
-        # Test filesize
         with self.assertRaises(ValueError):
             f.filesize
 
@@ -74,7 +73,7 @@ class TestGeneratorRecvars(unittest.TestCase):
             for i, n in enumerate(keys):
                 assert n in nc.dimensions.keys()
                 assert nc.dimensions[n] == dims[i]
-
+                assert nc.filesize == 80116
             nc.close()
 
         f.close()
