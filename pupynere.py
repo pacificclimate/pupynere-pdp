@@ -266,7 +266,7 @@ class netcdf_file(object):
         if self.recvars:
             if not self._recs:
                 raise ValueError("The number or records is not set so it is impossible to calculate the filesize")
-            recvar0 = self.recvars.values()[0]
+            recvar0 = list(self.recvars.values())[0]
             if not hasattr(recvar0, '_begin'):
                 self._calc_begins()
             return int(recvar0._begin + (self._recs * self._recsize))
@@ -1056,7 +1056,7 @@ class netcdf_variable(object):
                 recs = rec_index + 1
             if recs > len(self.data):
                 shape = (recs,) + self._shape[1:]
-                self.data.resize(shape)
+                self.data.resize(shape, refcheck=False)
         self.data[index] = data
     
     def _data_allocated(self):
@@ -1078,7 +1078,7 @@ class NcOrderedDict(OrderedDict):
         if key in self:
             OrderedDict.__setitem__(self, key, value)
         else:
-            items = self.items() + [(key, value)] if len(self) > 0 else [(key, value)]
+            items = list(self.items()) + [(key, value)] if len(self) > 0 else [(key, value)]
             recvars = [v for v in items if v[1].isrec]
             nonrecvars = [v for v in items if not v[1].isrec]
             def variableDiskSize(v):
@@ -1088,7 +1088,8 @@ class NcOrderedDict(OrderedDict):
                     return v.itemsize * np.prod(v.shape)
             nonrecvars.sort(key=lambda v: variableDiskSize(v[1]))
 
-            for key in self.keys():
+            copy = self.copy()
+            for key in copy.keys():
                 del self[key]
             for key, val in nonrecvars:
                 OrderedDict.__setitem__(self, key, val)
