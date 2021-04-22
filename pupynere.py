@@ -906,13 +906,21 @@ class netcdf_variable(object):
             self.__dict__[k] = v
 
     def __setattr__(self, attr, value):
-        # Store user defined attributes in a separate dict,
-        # so we can save them to file later.
-        try:
-            self._attributes[attr] = value
-        except AttributeError:
-            pass
-        self.__dict__[attr] = value
+        if attr == "data" and value is not None:
+            # (for example, someone did variable[:] = array)
+            # assign to variable data
+            if self._shape: # this variable is an array
+                self.__setitem__(slice(0, len(value)), value)
+            else: #this variable is a scalar
+                self.assignValue(value)
+        else:
+            # assign to a user-defined attribute; they're stored
+            # in a separate dict, to be saved to file later
+            try:
+                self._attributes[attr] = value
+            except AttributeError:
+                pass
+            self.__dict__[attr] = value
 
     def isrec(self):
         """Returns whether the variable has a record dimension or not.
@@ -1059,13 +1067,13 @@ class netcdf_variable(object):
                 shape = (recs,) + self._shape[1:]
                 self.data.resize(shape)
         self.data[index] = data
-    
+        
     def _data_allocated(self):
         return self.data is not None
     
     def _allocate_data(self):
         # Called when attempting to write to self.data if self.data is not yet initialized
-        self.data = empty(self.shape, self.dtype)
+        self.__dict__["data"] = empty(self.shape, self.dtype)
     
     def size(self):
         return np.prod(self.shape) if not self._data_allocated() else self.data.size
