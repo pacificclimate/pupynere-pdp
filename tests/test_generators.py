@@ -73,7 +73,7 @@ class TestGeneratorRecvars(unittest.TestCase):
             for i, n in enumerate(keys):
                 assert n in nc.dimensions.keys()
                 assert nc.dimensions[n] == dims[i]
-                assert nc.filesize == 80116
+                assert nc.filesize == 85252
             nc.close()
 
         f.close()

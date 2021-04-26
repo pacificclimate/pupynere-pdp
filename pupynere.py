@@ -1056,7 +1056,7 @@ class netcdf_variable(object):
                 recs = rec_index + 1
             if recs > len(self.data):
                 shape = (recs,) + self._shape[1:]
-                self.data.resize(shape, refcheck=False)
+                self.data = np.resize(self.data, shape)
         self.data[index] = data
     
     def _data_allocated(self):
