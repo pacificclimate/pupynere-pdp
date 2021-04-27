@@ -77,6 +77,3 @@ class TestGeneratorRecvars(unittest.TestCase):
             nc.close()
 
         f.close()
-
-def _input():
-    yield np.arange(10000).reshape(100, 100)
