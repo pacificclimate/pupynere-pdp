@@ -47,7 +47,6 @@ class AttributesTestCase(unittest.TestCase):
         data = NP.empty(shape=(DIM1_LEN,DIM2_LEN,DIM3_LEN))
         v[:] = data
 
-
         f.close()
 
     def tearDown(self):
@@ -65,7 +64,7 @@ class AttributesTestCase(unittest.TestCase):
         self.assertEqual(f.stratt, STRATT)
         self.assertEqual(f.emptystratt, EMPTYSTRATT)
         self.assertEqual(f.seqatt.tolist(), SEQATT.tolist())
-        self.assertEqual(f.filesize, 2880)
+        self.assertEqual(f.filesize, 1664)
 
         # variable attributes
         self.assertEqual(v.intatt, INTATT)
