@@ -24,10 +24,10 @@ class TestGeneratorNonrecvars(unittest.TestCase):
         temp.assignValue(VAR_VAL)
 
         # Test filesize property of a virtual file with nonrecvars
-        assert f.filesize == 88
+        assert f.filesize == 68
 
         # Test generator
-        pipeline = nc_generator(f, _input())
+        pipeline = nc_generator(f, iter(np.array([temp.data])))
         with tempfile.NamedTemporaryFile(suffix=".nc") as fn:
             for block in pipeline:
                 fn.write(block)
@@ -62,7 +62,7 @@ class TestGeneratorRecvars(unittest.TestCase):
             f.filesize
 
         # Test generator
-        pipeline = nc_generator(f, _input())
+        pipeline = nc_generator(f, iter(foo.data))
         with tempfile.NamedTemporaryFile(suffix=".nc") as fn:
             for block in pipeline:
                 fn.write(block)
@@ -73,11 +73,10 @@ class TestGeneratorRecvars(unittest.TestCase):
             for i, n in enumerate(keys):
                 assert n in nc.dimensions.keys()
                 assert nc.dimensions[n] == dims[i]
-                assert nc.filesize == 85252
+                assert nc.filesize == 5236
             nc.close()
 
         f.close()
-
 
 def _input():
     yield np.arange(10000).reshape(100, 100)

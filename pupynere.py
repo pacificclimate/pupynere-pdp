@@ -862,7 +862,7 @@ class netcdf_variable(object):
     ----------
     data : array_like
         The data array that holds the values for the variable.
-        Typically, this is initialized as empty, but with the proper shape.
+        Not initialized until data is assigned to it, to save memory.
     type: numpy dtype
         Desired data-type for the data array.
     shape : sequence of ints
@@ -893,18 +893,32 @@ class netcdf_variable(object):
 
     """
     def __init__(self, data, type, shape, dimensions, attributes=None, maskandscale=False, isrec=False):
-        self.data = data
         self.dtype = type
         self._shape = shape
         self.dimensions = dimensions
         self.maskandscale = maskandscale
         self._isrec = isrec
+        self.__dict__["data"] = data
 
         self._attributes = attributes or {}
         for k, v in self._attributes.items():
             self.__dict__[k] = v
 
     def __setattr__(self, attr, value):
+        # Data isn't allocated until an assignment is made
+        # (for memory-saving purposes)
+        # so if we're assigning data, we need to allocate it first.
+        if attr == "data" and not self._data_allocated():
+            if not self.isrec:
+                # we know what size data array we'll need, allocate it.
+                self._allocate_data()
+            else:
+                # record variable has unknown shape, since new records can be
+                # added. But the user did variable[:] = array or similar
+                # so the contents of the variable are just the value argument.
+                self.__dict__["data"] = value
+                return
+
         # Store user defined attributes in a separate dict,
         # so we can save them to file later.
         try:
@@ -1056,15 +1070,20 @@ class netcdf_variable(object):
                 recs = rec_index + 1
             if recs > len(self.data):
                 shape = (recs,) + self._shape[1:]
-                self.data = np.resize(self.data, shape)
-        self.data[index] = data
+                self.__dict__["data"] = np.resize(self.data, shape)
+        self.__dict__["data"][index] = data
     
     def _data_allocated(self):
-        return self.data is not None
+        return hasattr(self, "data") and self.data is not None
     
     def _allocate_data(self):
         # Called when attempting to write to self.data if self.data is not yet initialized
-        self.data = empty(self.shape, self.dtype)
+        if self._shape is not None:
+            # dimensional array
+            self.__dict__["data"] = empty(self.shape, self.dtype)
+        else:
+            # non-dimensional scalar
+            self.__dict__["data"] = 0
     
     def size(self):
         return np.prod(self.shape) if not self._data_allocated() else self.data.size
