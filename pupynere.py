@@ -1074,7 +1074,7 @@ class netcdf_variable(object):
         self.__dict__["data"][index] = data
     
     def _data_allocated(self):
-        return hasattr(self, "data") and self.data is not None
+        return self.data is not None
     
     def _allocate_data(self):
         # Called when attempting to write to self.data if self.data is not yet initialized
