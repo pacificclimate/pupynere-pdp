@@ -1,6 +1,13 @@
 News / Release Notes
 ====================
 
+2.0.1
+------
+*Release Date: 27-April-2021*
+
+* More updates for Python 3
+* Fix bug that assigned data to attribute named data
+
 2.0.0
 ------
 *Release Date: 21-April-2021*
